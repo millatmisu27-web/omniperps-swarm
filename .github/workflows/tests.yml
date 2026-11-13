@@ -1,0 +1,21 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Zero runtime dependencies — nothing to install.
+      - name: Unit tests
+        run: npm test
+      # Replay mode runs the full demo on recorded real prices, so CI
+      # never depends on live network luck.
+      - name: Headless demo (replay)
+        run: npm run demo -- --replay

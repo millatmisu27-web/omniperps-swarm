@@ -1,0 +1,10 @@
+# NEAR leg log (append-only)
+
+- 2026-11-13T19:39Z — Testnet RPC live check: status OK, chain_id=testnet, height ~277554223 at first probe.
+- 2026-11-13T19:40Z — MPC root keys fetched live via public_key view: mainnet v1.signer secp256k1:3tFRbMqm…UWya; testnet v1.signer-prod.testnet secp256k1:4NfTiv3U…Fwx3. near-faucet.io GET / → HTTP 200; guessed faucet API POSTs unusable (HTML shell / timeout).
+- 2026-11-13T19:41Z — Helper service probe: POST helper.testnet.near.org/account created omniperps-probe.testnet (HTTP 200, 10 NEAR, bogus placeholder key — account NOT controlled, discarded).
+- 2026-11-13T19:42Z — Created 3 controlled swarm accounts via helper (HTTP 200 each): omniperps-swarm.testnet (tx C4W5GTS4UZqKcUkhKfgkEred7WKctGy3axtTsJLZWAa2), omniperps-agent1-7f3a.testnet (tx HnqXv26ZRV16tW7Vk8So1SfkddYAfhv4CBXhG7k5Dihy), omniperps-agent2-7f3a.testnet (tx s8Pesx8Mqp55STZiog7o7gQvMNPiHmtxwUrQVdhqfan), 10 NEAR each, keys handed to coordinator off-repo.
+- 2026-11-13T19:43Z — src/near-proof.js run OK: status height 277554610, hash 9eo9nWztWwaNqhUyavRrQLueXfL1CnS7jXDw6RKLXcEU; testnet account ≈812045.39 NEAR; swarm master verified 10 NEAR at block 277554608.
+- 2026-11-13T19:43Z — Chain Signatures derivation implemented (near/mpc epsilon, sha3-256 tweak + secp256k1 additive + keccak-256). chainsig.js testnet contract vector reproduces exactly. Docs example.near mainnet examples do NOT reproduce under current mainnet root — documented in NEAR_PROOF.md.
+- 2026-11-13T19:44Z — derived_public_key view on v1.signer-prod.testnet (arg `predecessor`, block 277554654) returned secp256k1:4xuTMHCU…Qjh2wB for omniperps-swarm.testnet+ethereum-1 — identical to local derivation. Swarm derived EVM (testnet MPC): 0x28ece91f7e9506d4c6f6a8d36db270d4ec1a688d. Agents verified on-chain at blocks 277554626/277554631.
+- 2026-11-13T19:44Z — buildSettlementIntent() produces NEAR Intents-style token_diff intent (sample: long 0.01 BTC @ 97500). NOT signed/executed. No MPC sign call made. Docs written: docs/NEAR_PROOF.md.

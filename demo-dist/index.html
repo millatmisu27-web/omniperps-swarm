@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniPerps Swarm — LIVE HOSTED DEMO — NEAR HACKATHON</title>
+<style>
+:root{--bg:#0b0e14;--card:#131826;--line:#232a3d;--txt:#e6e9f2;--dim:#8b93a7;--acc:#00ec97;--warn:#ffb454;--bad:#ff5d73;--blue:#4da3ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+header{display:flex;justify-content:space-between;gap:16px;padding:18px 22px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+h1{margin:0;font-size:26px}h1 span{color:var(--acc)}h2{font-size:15px;margin:0 0 10px;color:#c8cede}h3{font-size:13px;color:var(--dim);margin:14px 0 6px}
+.sub{color:var(--dim);max-width:640px;margin:6px 0 0}
+.pricebox{text-align:right}.price{font-size:30px;font-weight:700}.label{color:var(--dim);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+.meta{color:var(--dim);font-size:12px}.tag{color:var(--blue);font-size:11px}
+main{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px;padding:14px 22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}.card.wide{grid-column:1/-1}
+canvas{width:100%;height:180px;background:#0d1119;border-radius:8px}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button{background:#1c2334;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 12px;cursor:pointer}
+button:hover{border-color:var(--acc)}button.warn{border-color:var(--warn)}button.danger{border-color:var(--bad);color:var(--bad)}
+.kv{white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;font-size:13px}
+.log{font-family:ui-monospace,Menlo,monospace;font-size:12px;max-height:300px;overflow:auto}
+.log.small{max-height:160px}.log div{padding:3px 0;border-bottom:1px dashed #1d2436}
+.log .t{color:var(--dim)}
+.gauge{height:14px;background:#0d1119;border-radius:7px;overflow:hidden;margin:6px 0}
+.gauge>div{height:100%;background:var(--acc);transition:width .5s}
+.agent{border:1px solid var(--line);border-radius:10px;padding:10px;margin-bottom:8px}
+.agent b{color:var(--acc)}.agent .st{color:var(--dim)}
+.banner{margin:12px 22px 0;padding:10px 14px;border-radius:8px;background:#2a2113;border:1px solid var(--warn);color:var(--warn)}
+.banner.kill{background:#2a131a;border-color:var(--bad);color:var(--bad)}
+.hidden{display:none}footer{padding:14px 22px;color:var(--dim);font-size:12px;border-top:1px solid var(--line)}
+.up{color:var(--acc)}.down{color:var(--bad)}
+
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>OmniPerps <span>Swarm</span></h1>
+    <p class="sub">A three-agent swarm trading BTC-PERP — Signal proposes, Risk can veto, Execution acts only with approval. Live prices, paper settlement, NEAR-guarded limits.</p>
+  </div>
+  <div class="pricebox">
+    <div class="label">BTC-PERP mark</div>
+    <div id="price" class="price">—</div>
+    <div id="priceMeta" class="meta">connecting…</div>
+  </div>
+</header>
+
+<div id="shockBanner" class="banner hidden"></div>
+<div id="killBanner" class="banner kill hidden">⛔ KILL SWITCH ENGAGED — all agents halted</div>
+
+<main>
+  <section class="card wide">
+    <h2>Live price (real feed) <span id="histNote" class="tag"></span></h2>
+    <canvas id="chart" width="900" height="180"></canvas>
+    <div class="controls">
+      <button id="btnCycle">▶ Run decision cycle</button>
+      <button id="btnStress" class="warn">⚠ Stress test (−18% adverse, simulated)</button>
+      <button id="btnRecover">Clear stress overlay</button>
+      <button id="btnClose">Close position</button>
+      <button id="btnKill" class="danger">⛔ KILL SWITCH</button>
+      <button id="btnReset">Reset demo</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Position &amp; account (paper settlement)</h2>
+    <div id="position" class="kv">No open position</div>
+    <div class="gaugeWrap">
+      <div class="label">Distance to liquidation</div>
+      <div class="gauge"><div id="liqGauge"></div></div>
+      <div id="liqText" class="meta">—</div>
+    </div>
+    <div id="account" class="kv"></div>
+  </section>
+
+  <section class="card">
+    <h2>Agent swarm</h2>
+    <div id="agents"></div>
+    <h3>Fee ledger (agents pay / earn per task)</h3>
+    <div id="ledger" class="log small"></div>
+  </section>
+
+  <section class="card">
+    <h2>SpendGuard policy (AI Security)</h2>
+    <div id="guard" class="kv"></div>
+    <h3>Guard check log</h3>
+    <div id="guardLog" class="log small"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>Swarm decision log — propose → verdict → execute / block</h2>
+    <div id="swarmLog" class="log"></div>
+  </section>
+
+  <section class="card wide">
+    <h2>NEAR layer — on-chain proof</h2>
+    <div id="near" class="kv">loading…</div>
+    <p class="meta">Real NEAR testnet accounts created for this swarm: master omniperps-swarm.testnet (10 NEAR) + two agent accounts (creation tx hashes in docs/NEAR_PROOF.md). Via NEAR Chain Signatures derivation the master controls EVM address 0x28ece91f7e9506d4c6f6a8d36db270d4ec1a688d — confirmed by the testnet MPC contract itself. See README for exactly what is live vs simulated.</p>
+    <div id="intents" class="log small"></div>
+  </section>
+</main>
+
+<footer>Built at NEAR HACKATHON · Tracks: Unstoppable DeFi · AI Swarms · Agent Economy · AI Security &amp; Defense · Prices: Kraken/Coinbase/CoinGecko public APIs · Settlement: paper (no real funds)</footer>
+<script>
+window.__mods = {};
+window.__mods.perps = (function(){ const module = { exports: {} }; const exports = module.exports;
+'use strict';
+/**
+ * PerpEngine — a single-market (BTC-PERP) perpetuals engine with
+ * paper settlement and correct isolated-margin math.
+ *
+ * Prices fed in are REAL (live public feeds — see pricefeed.js).
+ * Settlement is PAPER: no real funds move. That split is stated
+ * plainly in the README and the UI.
+ *
+ * Conventions:
+ *  - Collateral / PnL currency: USDT (paper).
+ *  - One open position at a time (demo account), isolated margin.
+ *  - Maintenance margin rate (mmr): 0.5% of mark notional.
+ *  - Taker fee: 0.05% of notional, charged on open and on close.
+ */
+
+const MMR = 0.005;          // maintenance margin rate
+const TAKER_FEE = 0.0005;   // 0.05%
+
+class PerpEngine {
+  constructor({ startingBalance = 100000 } = {}) {
+    this.walletBalance = startingBalance; // realised, free collateral (USDT paper)
+    this.position = null;                 // {side,sizeBtc,entryPrice,leverage,margin,openedAt}
+    this.markPrice = null;
+    this.realisedPnlTotal = 0;
+    this.feesPaidTotal = 0;
+    this.liquidations = 0;
+    this.events = [];                     // engine-level event log
+  }
+
+  setMarkPrice(price) {
+    if (!(price > 0)) throw new Error('mark price must be > 0');
+    this.markPrice = price;
+    return this.checkLiquidation();
+  }
+
+  notional(sizeBtc, price) { return sizeBtc * price; }
+
+  /** Margin required to open: notional / leverage. */
+  requiredMargin(sizeBtc, price, leverage) {
+    return this.notional(sizeBtc, price) / leverage;
+  }
+
+  /**
+   * Liquidation price (isolated margin).
+   * Long : liq = entry * (1 - 1/L) / (1 - mmr)
+   * Short: liq = entry * (1 + 1/L) / (1 + mmr)
+   * Derived from: loss at liq == margin - mmr * liqNotional.
+   */
+  liquidationPrice(side, entryPrice, leverage) {
+    if (side === 'long') return entryPrice * (1 - 1 / leverage) / (1 - MMR);
+    return entryPrice * (1 + 1 / leverage) / (1 + MMR);
+  }
+
+  unrealisedPnl(price = this.markPrice) {
+    if (!this.position || price == null) return 0;
+    const { side, sizeBtc, entryPrice } = this.position;
+    return side === 'long'
+      ? (price - entryPrice) * sizeBtc
+      : (entryPrice - price) * sizeBtc;
+  }
+
+  /** Account equity = free collateral + locked margin + uPnL. */
+  equity(price = this.markPrice) {
+    if (!this.position) return this.walletBalance;
+    return this.walletBalance + this.position.margin + this.unrealisedPnl(price);
+  }
+
+  maintenanceMargin(price = this.markPrice) {
+    if (!this.position || price == null) return 0;
+    return this.notional(this.position.sizeBtc, price) * MMR;
+  }
+
+  /** Distance from mark price to liquidation price, as % of mark. */
+  liquidationDistancePct(price = this.markPrice) {
+    if (!this.position || price == null) return null;
+    const liq = this.liquidationPrice(this.position.side, this.position.entryPrice, this.position.leverage);
+    return Math.abs(price - liq) / price * 100;
+  }
+
+  openPosition({ side, sizeBtc, leverage, price }) {
+    if (this.position) throw new Error('a position is already open');
+    if (!['long', 'short'].includes(side)) throw new Error('side must be long|short');
+    if (!(sizeBtc > 0)) throw new Error('sizeBtc must be > 0');
+    if (!(leverage >= 1 && leverage <= 50)) throw new Error('leverage must be 1..50');
+    const margin = this.requiredMargin(sizeBtc, price, leverage);
+    const fee = this.notional(sizeBtc, price) * TAKER_FEE;
+    if (margin + fee > this.walletBalance) throw new Error('insufficient collateral');
+    this.walletBalance -= (margin + fee);
+    this.feesPaidTotal += fee;
+    this.position = { side, sizeBtc, entryPrice: price, leverage, margin, openedAt: Date.now() };
+    this.markPrice = price;
+    const liq = this.liquidationPrice(side, price, leverage);
+    this.events.push({ ts: Date.now(), type: 'open', side, sizeBtc, price, leverage, margin, fee, liquidationPrice: liq });
+    return { ...this.position, liquidationPrice: liq, fee };
+  }
+
+  /**
+   * Close `fraction` (0..1) of the position at `price`.
+   * Returns realised PnL for the closed part. Realised loss can never
+   * exceed the margin allocated to the closed part (isolated margin);
+   * liquidation (checkLiquidation) is what enforces that boundary live.
+   */
+  closePosition(price, fraction = 1) {
+    if (!this.position) throw new Error('no open position');
+    if (!(fraction > 0 && fraction <= 1)) throw new Error('fraction must be in (0,1]');
+    const pos = this.position;
+    const closeSize = pos.sizeBtc * fraction;
+    const pnlPerBtc = pos.side === 'long' ? price - pos.entryPrice : pos.entryPrice - price;
+    let pnl = pnlPerBtc * closeSize;
+    const marginPart = pos.margin * fraction;
+    if (pnl < -marginPart) pnl = -marginPart; // isolated-margin floor
+    const fee = this.notional(closeSize, price) * TAKER_FEE;
+    const returned = Math.max(0, marginPart + pnl - fee);
+    this.walletBalance += returned;
+    this.feesPaidTotal += fee;
+    this.realisedPnlTotal += pnl;
+    this.events.push({ ts: Date.now(), type: fraction >= 1 ? 'close' : 'reduce', side: pos.side, sizeBtc: closeSize, price, pnl, fee, returned });
+    if (fraction >= 1) {
+      this.position = null;
+    } else {
+      this.position = { ...pos, sizeBtc: pos.sizeBtc - closeSize, margin: pos.margin - marginPart };
+    }
+    return { pnl, fee, returned };
+  }
+
+  /**
+   * Isolated-margin liquidation: if the POSITION's own equity
+   * (its margin + its uPnL) falls to/below its maintenance margin,
+   * the position is liquidated and its margin is lost. Free wallet
+   * collateral does NOT rescue an isolated position.
+   */
+  checkLiquidation(price = this.markPrice) {
+    if (!this.position || price == null) return null;
+    const positionEquity = this.position.margin + this.unrealisedPnl(price);
+    if (positionEquity <= this.maintenanceMargin(price)) {
+      const pos = { ...this.position };
+      const pnl = -pos.margin; // isolated: entire margin is lost
+      this.realisedPnlTotal += pnl;
+      this.position = null;
+      this.liquidations += 1;
+      const ev = { ts: Date.now(), type: 'liquidation', side: pos.side, sizeBtc: pos.sizeBtc, price, pnl };
+      this.events.push(ev);
+      return ev;
+    }
+    return null;
+  }
+
+  snapshot() {
+    const liq = this.position
+      ? this.liquidationPrice(this.position.side, this.position.entryPrice, this.position.leverage)
+      : null;
+    return {
+      walletBalance: round2(this.walletBalance),
+      markPrice: this.markPrice,
+      position: this.position ? { ...this.position, liquidationPrice: round2(liq) } : null,
+      unrealisedPnl: round2(this.unrealisedPnl()),
+      equity: round2(this.equity()),
+      maintenanceMargin: round2(this.maintenanceMargin()),
+      liquidationDistancePct: this.position ? round2(this.liquidationDistancePct()) : null,
+      realisedPnlTotal: round2(this.realisedPnlTotal),
+      feesPaidTotal: round2(this.feesPaidTotal),
+      liquidations: this.liquidations,
+    };
+  }
+}
+
+function round2(n) { return Math.round(n * 100) / 100; }
+
+module.exports = { PerpEngine, MMR, TAKER_FEE };
+
+return module.exports; })();
+window.__mods.policy = (function(){ const module = { exports: {} }; const exports = module.exports;
+'use strict';
+/**
+ * SpendGuard — the swarm's policy engine (AI Security & Defense track).
+ *
+ * Every order the Execution Agent wants to place MUST pass checkOrder().
+ * The Risk Agent calls it; a veto is final. Every check — pass or veto —
+ * is written to an auditable log.
+ *
+ * This module is the off-chain reference implementation of the guard
+ * state that the NEAR leg mirrors on testnet (see docs/NEAR_PROOF.md):
+ * per-agent limits + a global kill switch.
+ */
+
+const DEFAULT_LIMITS = {
+  // Per-order notional caps (USDT) by proposing/executing role
+  maxNotionalPerOrder: 25000,
+  // Hard leverage ceiling for any agent, regardless of proposal
+  maxLeverage: 10,
+  // An order is vetoed if its liquidation price would sit closer
+  // than this % distance from the entry price (too fragile).
+  minLiquidationDistancePct: 12,
+  // Swarm is halted for the day if realised losses exceed this (USDT)
+  maxDailyRealisedLoss: 5000,
+};
+
+class SpendGuard {
+  constructor(limits = {}) {
+    this.limits = { ...DEFAULT_LIMITS, ...limits };
+    this.killSwitch = false;
+    this.killedBy = null;
+    this.log = []; // every check, in order
+  }
+
+  setKill(on, by = 'operator') {
+    this.killSwitch = !!on;
+    this.killedBy = on ? by : null;
+    const ev = { ts: Date.now(), type: on ? 'kill_engaged' : 'kill_released', by };
+    this.log.push({ ts: ev.ts, agent: by, verdict: ev.type, reasons: [] });
+    return ev;
+  }
+
+  /**
+   * @param order {agent, side, sizeBtc, leverage, price, liquidationPrice, dailyRealisedPnl}
+   * @returns {allowed: boolean, reasons: string[]}
+   */
+  checkOrder(order) {
+    const reasons = [];
+    const notional = order.sizeBtc * order.price;
+
+    if (this.killSwitch) reasons.push(`KILL SWITCH is engaged (by ${this.killedBy || 'operator'}) — all trading halted`);
+    if (notional > this.limits.maxNotionalPerOrder) {
+      reasons.push(`notional $${notional.toFixed(2)} exceeds per-order cap $${this.limits.maxNotionalPerOrder}`);
+    }
+    if (order.leverage > this.limits.maxLeverage) {
+      reasons.push(`leverage ${order.leverage}x exceeds ceiling ${this.limits.maxLeverage}x`);
+    }
+    if (order.liquidationPrice != null && order.price > 0) {
+      const distPct = Math.abs(order.price - order.liquidationPrice) / order.price * 100;
+      if (distPct < this.limits.minLiquidationDistancePct) {
+        reasons.push(`liquidation distance ${distPct.toFixed(2)}% below minimum ${this.limits.minLiquidationDistancePct}%`);
+      }
+    }
+    if ((order.dailyRealisedPnl ?? 0) < -this.limits.maxDailyRealisedLoss) {
+      reasons.push(`daily realised loss limit $${this.limits.maxDailyRealisedLoss} already breached`);
+    }
+
+    const allowed = reasons.length === 0;
+    this.log.push({
+      ts: Date.now(),
+      agent: order.agent,
+      verdict: allowed ? 'allow' : 'veto',
+      notional: Math.round(notional * 100) / 100,
+      reasons,
+    });
+    return { allowed, reasons };
+  }
+
+  snapshot() {
+    return {
+      limits: { ...this.limits },
+      killSwitch: this.killSwitch,
+      killedBy: this.killedBy,
+      checksLogged: this.log.length,
+      vetoes: this.log.filter(l => l.verdict === 'veto').length,
+    };
+  }
+}
+
+module.exports = { SpendGuard, DEFAULT_LIMITS };
+
+return module.exports; })();
+window.__mods.pricefeed = (function(){ const module = { exports: {} }; const exports = module.exports;
+'use strict';
+/**
+ * PriceFeed — LIVE BTC/USD prices from public sources, in order:
+ *   1. Kraken public Ticker API   (verified reachable from build env)
+ *   2. Coinbase public Spot API   (verified reachable)
+ *   3. CoinGecko simple price API (verified reachable)
+ * Binance/Bybit were tried first in the build environment and are
+ * geo-blocked there; they are not used.
+ *
+ * History is seeded from Kraken OHLC 1-minute candles and extended
+ * with live polls. Every point records its source — the UI shows it.
+ * No price is ever fabricated: if all sources fail, getPrice() throws
+ * and the last source label says so.
+ */
+
+const SOURCES = [
+  {
+    name: 'kraken',
+    url: 'https://api.kraken.com/0/public/Ticker?pair=XBTUSD',
+    parse: j => parseFloat(j.result.XXBTZUSD.c[0]),
+  },
+  {
+    name: 'coinbase',
+    url: 'https://api.coinbase.com/v2/prices/BTC-USD/spot',
+    parse: j => parseFloat(j.data.amount),
+  },
+  {
+    name: 'coingecko',
+    url: 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
+    parse: j => j.bitcoin.usd,
+  },
+];
+
+async function fetchJson(url, timeoutMs = 6000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const r = await fetch(url, { signal: ctl.signal, headers: { 'user-agent': 'omniperps-swarm/0.1' } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+class PriceFeed {
+  constructor() {
+    this.history = [];       // {ts, price, source}
+    this.lastSource = null;
+    this.lastError = null;
+  }
+
+  async pollOnce() {
+    let lastErr = null;
+    for (const s of SOURCES) {
+      try {
+        const j = await fetchJson(s.url);
+        const price = s.parse(j);
+        if (!(price > 0)) throw new Error('bad price payload');
+        const pt = { ts: Date.now(), price, source: s.name };
+        this.history.push(pt);
+        if (this.history.length > 600) this.history.shift();
+        this.lastSource = s.name;
+        this.lastError = null;
+        return pt;
+      } catch (e) { lastErr = e; }
+    }
+    this.lastError = String(lastErr && lastErr.message || lastErr);
+    throw new Error(`all price sources failed: ${this.lastError}`);
+  }
+
+  /** Seed history from Kraken 1m OHLC candles (real market history). */
+  async seedHistory(limit = 60) {
+    try {
+      const j = await fetchJson(`https://api.kraken.com/0/public/OHLC?pair=XBTUSD&interval=1`);
+      const candles = j.result.XXBTZUSD.slice(-limit);
+      for (const c of candles) {
+        this.history.push({ ts: c[0] * 1000, price: parseFloat(c[4]), source: 'kraken-ohlc' });
+      }
+      return candles.length;
+    } catch (e) {
+      this.lastError = `seed failed: ${e.message}`;
+      return 0;
+    }
+  }
+
+  latest() { return this.history.length ? this.history[this.history.length - 1] : null; }
+}
+
+module.exports = { PriceFeed, SOURCES };
+
+return module.exports; })();
+window.__mods.agents = (function(){ const module = { exports: {} }; const exports = module.exports;
+'use strict';
+/**
+ * The Swarm — three agents, one auditable conversation.
+ *
+ *  Signal Agent    watches the live price, proposes trades with reasons.
+ *  Risk Agent      independent. Reviews every proposal against the
+ *                  SpendGuard policy + live liquidation distance.
+ *                  Can APPROVE, VETO (final), REDUCE, and can
+ *                  FORCE-REDUCE / FORCE-CLOSE an open position.
+ *  Execution Agent the only agent that can touch the PerpEngine, and
+ *                  only with a Risk approval in hand. Re-checks the
+ *                  SpendGuard itself immediately before acting.
+ *
+ * Agent Economy: agents are paid per completed task from a protocol
+ * fee pool into an internal ledger (see FeeLedger) — Signal earns for
+ * an executed proposal, Risk earns per review and a bonus for a
+ * protective force-reduce, Execution earns per order. The ledger is
+ * shown in the UI and mirrors the per-agent NEAR sub-account design
+ * in docs/NEAR_PROOF.md.
+ */
+
+const FEES = {
+  signalExecutedProposal: 2.0,
+  riskReview: 1.5,
+  riskProtectionBonus: 4.0,
+  executionOrder: 3.0,
+  executionClose: 2.0,
+};
+
+class FeeLedger {
+  constructor() { this.entries = []; this.balances = { signal: 0, risk: 0, execution: 0 }; }
+  pay(to, amount, reason) {
+    this.balances[to] = Math.round((this.balances[to] + amount) * 100) / 100;
+    this.entries.push({ ts: Date.now(), from: 'protocol-fee-pool', to, amount, reason });
+  }
+}
+
+function ema(values, period) {
+  const k = 2 / (period + 1);
+  let e = values[0];
+  for (const v of values) e = v * k + e * (1 - k);
+  return e;
+}
+
+class SignalAgent {
+  constructor() { this.name = 'signal'; }
+  /** Propose a trade from price history (EMA crossover + momentum). */
+  evaluate(history, markPrice) {
+    if (history.length < 25) return null;
+    const closes = history.map(h => h.price);
+    const fast = ema(closes.slice(-30), 5);
+    const slow = ema(closes.slice(-60), 20);
+    const momentumPct = (fast - slow) / slow * 100;
+    const side = momentumPct >= 0 ? 'long' : 'short';
+    // Target ~$18k notional (inside the $25k guard cap), 5x leverage.
+    const sizeBtc = Math.round((18000 / markPrice) * 10000) / 10000;
+    return {
+      side, sizeBtc, leverage: 5,
+      reason: `EMA5 ${momentumPct >= 0 ? 'above' : 'below'} EMA20 by ${Math.abs(momentumPct).toFixed(3)}% on live BTC feed — momentum favours ${side.toUpperCase()}`,
+      confidence: Math.min(0.99, 0.5 + Math.abs(momentumPct) * 2),
+      momentumPct,
+    };
+  }
+}
+
+class RiskAgent {
+  constructor() { this.name = 'risk'; this.protectDistancePct = 12; this.criticalDistancePct = 7; }
+
+  review(proposal, engine, guard) {
+    const liq = engine.liquidationPrice(proposal.side, engine.markPrice ?? proposal.price, proposal.leverage);
+    const price = engine.markPrice ?? proposal.price;
+    const distPct = Math.abs(price - liq) / price * 100;
+    let sizeBtc = proposal.sizeBtc;
+    let adjusted = false;
+    // Fragile proposals get cut in half before the guard check.
+    if (distPct < 20 && sizeBtc > 0.02) { sizeBtc = Math.round(sizeBtc / 2 * 10000) / 10000; adjusted = true; }
+    const check = guard.checkOrder({
+      agent: 'execution', side: proposal.side, sizeBtc, leverage: proposal.leverage,
+      price, liquidationPrice: liq, dailyRealisedPnl: engine.realisedPnlTotal,
+    });
+    if (!check.allowed) {
+      return { verdict: 'veto', sizeBtc, liquidationPrice: liq, distancePct: distPct, reasons: check.reasons };
+    }
+    return {
+      verdict: adjusted ? 'approve_reduced' : 'approve',
+      sizeBtc, liquidationPrice: liq, distancePct: distPct,
+      reasons: adjusted ? [`liquidation distance ${distPct.toFixed(1)}% is thin — size halved as a precaution`] : ['within all guard limits'],
+    };
+  }
+
+  /** Protection check for an open position. Returns action or null. */
+  protection(engine) {
+    if (!engine.position) return null;
+    const dist = engine.liquidationDistancePct();
+    if (dist == null) return null;
+    if (dist < this.criticalDistancePct) return { action: 'force_close', distancePct: dist, reason: `liquidation distance ${dist.toFixed(1)}% < critical ${this.criticalDistancePct}% — closing to save remaining margin` };
+    if (dist < this.protectDistancePct) return { action: 'force_reduce', fraction: 0.5, distancePct: dist, reason: `liquidation distance ${dist.toFixed(1)}% < protection ${this.protectDistancePct}% — cutting position in half` };
+    return null;
+  }
+}
+
+class ExecutionAgent {
+  constructor() { this.name = 'execution'; }
+  open(engine, { side, sizeBtc, leverage, price }) { return engine.openPosition({ side, sizeBtc, leverage, price }); }
+  close(engine, price, fraction = 1) { return engine.closePosition(price, fraction); }
+}
+
+/** NEAR Intents-style settlement intent for a trade (produced per order; see README for what is live vs produced). */
+function buildSettlementIntent({ side, sizeBtc, price, accountId = 'omniperps-swarm.testnet' }) {
+  return {
+    intent_type: 'token_diff',
+    produced_by: 'omniperps-swarm',
+    account_id: accountId,
+    market: 'BTC-PERP',
+    side,
+    diff: { 'perp:btc-usdt': side === 'long' ? `+${sizeBtc}` : `-${sizeBtc}`, 'usdt:collateral': 'paper-settlement' },
+    reference_price_usd: price,
+    note: 'Intent object produced by the swarm per executed order. Settlement itself is paper (see README).',
+    ts: new Date().toISOString(),
+  };
+}
+
+class Swarm {
+  constructor({ engine, guard }) {
+    this.engine = engine;
+    this.guard = guard;
+    this.signal = new SignalAgent();
+    this.risk = new RiskAgent();
+    this.execution = new ExecutionAgent();
+    this.ledger = new FeeLedger();
+    this.log = [];       // swarm decision transcript
+    this.intents = [];   // settlement intents produced
+    this.autoTrade = true;
+    this.lastCycleAt = 0;
+    this.cycleCooldownMs = 15000;
+    this.protectionCooldownMs = 8000;
+    this.protectionCooldownUntil = 0;
+  }
+
+  say(from, to, type, text) {
+    const entry = { ts: Date.now(), from, to, type, text };
+    this.log.push(entry);
+    if (this.log.length > 400) this.log.shift();
+    return entry;
+  }
+
+  setKill(on, by) {
+    const ev = this.guard.setKill(on, by);
+    this.say(by, 'swarm', on ? 'kill' : 'resume', on ? 'KILL SWITCH ENGAGED — all agents halted' : 'Kill switch released — agents may trade again');
+    return ev;
+  }
+
+  /** One full decision cycle: propose -> review -> (execute | veto). */
+  runCycle(history, markPrice) {
+    if (this.guard.killSwitch) { this.say('risk', 'swarm', 'blocked', 'Cycle skipped: kill switch engaged'); return { acted: false, why: 'killed' }; }
+    if (this.engine.position) return { acted: false, why: 'position-open' };
+    const proposal = this.signal.evaluate(history, markPrice);
+    if (!proposal) return { acted: false, why: 'not-enough-history' };
+    this.say('signal', 'risk', 'propose', `${proposal.side.toUpperCase()} ${proposal.sizeBtc} BTC @ ~$${markPrice} x${proposal.leverage} — ${proposal.reason}`);
+    const review = this.risk.review(proposal, this.engine, this.guard);
+    this.ledger.pay('risk', FEES.riskReview, 'proposal review');
+    if (review.verdict === 'veto') {
+      this.say('risk', 'signal', 'veto', `VETO — ${review.reasons.join('; ')}`);
+      return { acted: false, why: 'veto', review };
+    }
+    this.say('risk', 'execution', review.verdict, `${review.verdict === 'approve_reduced' ? 'APPROVED (reduced)' : 'APPROVED'} — size ${review.sizeBtc} BTC, liq @ $${review.liquidationPrice.toFixed(2)} (${review.distancePct.toFixed(1)}% away). ${review.reasons.join('; ')}`);
+    // Execution re-checks the guard itself, immediately before acting.
+    const recheck = this.guard.checkOrder({ agent: 'execution', side: proposal.side, sizeBtc: review.sizeBtc, leverage: proposal.leverage, price: markPrice, liquidationPrice: review.liquidationPrice, dailyRealisedPnl: this.engine.realisedPnlTotal });
+    if (!recheck.allowed) {
+      this.say('execution', 'swarm', 'blocked', `Execution refused at final guard check — ${recheck.reasons.join('; ')}`);
+      return { acted: false, why: 'execution-guard-block', review };
+    }
+    const opened = this.execution.open(this.engine, { side: proposal.side, sizeBtc: review.sizeBtc, leverage: proposal.leverage, price: markPrice });
+    this.ledger.pay('signal', FEES.signalExecutedProposal, 'executed proposal');
+    this.ledger.pay('execution', FEES.executionOrder, 'order execution');
+    const intent = buildSettlementIntent({ side: proposal.side, sizeBtc: review.sizeBtc, price: markPrice });
+    this.intents.push(intent);
+    this.say('execution', 'swarm', 'executed', `OPENED ${proposal.side.toUpperCase()} ${review.sizeBtc} BTC @ $${markPrice} — margin $${opened.margin.toFixed(2)}, liq @ $${opened.liquidationPrice.toFixed(2)}. Settlement intent produced.`);
+    this.lastCycleAt = Date.now();
+    return { acted: true, opened, review };
+  }
+
+  /** Per-tick housekeeping: liquidation events + risk protection. */
+  onPrice(price) {
+    const liqEv = this.engine.checkLiquidation(price);
+    if (liqEv) {
+      this.say('risk', 'swarm', 'liquidation', `POSITION LIQUIDATED @ $${price} — isolated margin lost. Protection acts earlier by design; this is the last-resort boundary.`);
+      return liqEv;
+    }
+    if (this.engine.position && !this.guard.killSwitch && Date.now() >= this.protectionCooldownUntil) {
+      const act = this.risk.protection(this.engine);
+      if (act) {
+        if (act.action === 'force_reduce') {
+          const r = this.execution.close(this.engine, price, act.fraction);
+          this.ledger.pay('risk', FEES.riskProtectionBonus, 'protective force-reduce');
+          this.ledger.pay('execution', FEES.executionClose, 'force-reduce execution');
+          this.say('risk', 'execution', 'force_reduce', `FORCE-REDUCE 50% @ $${price} — ${act.reason}. Realised PnL on closed half: $${r.pnl.toFixed(2)}`);
+          this.protectionCooldownUntil = Date.now() + this.protectionCooldownMs;
+        } else if (act.action === 'force_close') {
+          const r = this.execution.close(this.engine, price, 1);
+          this.ledger.pay('risk', FEES.riskProtectionBonus, 'protective force-close');
+          this.ledger.pay('execution', FEES.executionClose, 'force-close execution');
+          this.say('risk', 'execution', 'force_close', `FORCE-CLOSE @ $${price} — ${act.reason}. Realised PnL: $${r.pnl.toFixed(2)}`);
+          this.protectionCooldownUntil = Date.now() + this.protectionCooldownMs;
+        }
+        return act;
+      }
+    }
+    return null;
+  }
+
+  closePosition(price, by = 'operator') {
+    if (!this.engine.position) return null;
+    const r = this.execution.close(this.engine, price, 1);
+    this.ledger.pay('execution', FEES.executionClose, `position close (${by})`);
+    this.say('execution', 'swarm', 'executed', `CLOSED position @ $${price} by ${by} — realised PnL $${r.pnl.toFixed(2)}, fees $${r.fee.toFixed(2)}`);
+    return r;
+  }
+
+  agentCards() {
+    const halted = this.guard.killSwitch;
+    return [
+      // Real NEAR testnet accounts created for this project (see docs/NEAR_PROOF.md):
+      // Signal and Risk hold their own agent accounts; Execution acts under the master.
+      { id: 'signal', role: 'Signal Agent', status: halted ? 'halted' : 'watching live feed', earned: this.ledger.balances.signal, nearAccount: 'omniperps-agent1-7f3a.testnet' },
+      { id: 'risk', role: 'Risk Agent', status: halted ? 'halted' : (this.engine.position ? 'guarding open position' : 'reviewing proposals'), earned: this.ledger.balances.risk, nearAccount: 'omniperps-agent2-7f3a.testnet' },
+      { id: 'execution', role: 'Execution Agent', status: halted ? 'halted' : 'ready — guard-checked orders only', earned: this.ledger.balances.execution, nearAccount: 'omniperps-swarm.testnet (master)' },
+    ];
+  }
+
+  snapshot() {
+    return {
+      agents: this.agentCards(),
+      log: this.log.slice(-60),
+      ledger: this.ledger.entries.slice(-30),
+      ledgerBalances: this.ledger.balances,
+      intents: this.intents.slice(-5),
+      autoTrade: this.autoTrade,
+    };
+  }
+}
+
+module.exports = { Swarm, SignalAgent, RiskAgent, ExecutionAgent, FeeLedger, FEES, buildSettlementIntent };
+
+return module.exports; })();
+'use strict';
+/**
+ * HOSTED DEMO MODE glue.
+ *
+ * This page is the static-host build of the OmniPerps console. There is
+ * no server: the REAL PerpEngine, SpendGuard and Swarm modules run in
+ * your browser (bundled unmodified from src/), prices come from the
+ * same live public feeds, and settlement is paper — exactly like the
+ * local full stack. The only difference: /api/near performs a live
+ * NEAR testnet RPC status read from the browser instead of the
+ * server-side proof module (see docs/NEAR_PROOF.md in the repo).
+ *
+ * The glue installs a fetch() shim for the console's /api/* calls so
+ * public/app.js runs unmodified.
+ */
+(function () {
+  const { PerpEngine } = window.__mods.perps;
+  const { SpendGuard } = window.__mods.policy;
+  const { PriceFeed } = window.__mods.pricefeed;
+  const { Swarm } = window.__mods.agents;
+
+  let engine, guard, swarm, feed;
+  let shock = { active: false, direction: 0, stepsLeft: 0, stepPct: 0, offsetPct: 0 };
+  let lastLivePrice = null;
+
+  function resetAll() {
+    engine = new PerpEngine({ startingBalance: 100000 });
+    guard = new SpendGuard();
+    swarm = new Swarm({ engine, guard });
+    shock = { active: false, direction: 0, stepsLeft: 0, stepPct: 0, offsetPct: 0 };
+  }
+  resetAll();
+  feed = new PriceFeed();
+
+  const effectivePrice = () => lastLivePrice == null ? null
+    : Math.round(lastLivePrice * (1 + shock.offsetPct / 100) * 100) / 100;
+
+  function applyMark() {
+    const p = effectivePrice();
+    if (p == null) return;
+    engine.setMarkPrice(p);
+    swarm.onPrice(p);
+  }
+
+  async function boot() {
+    try { await feed.seedHistory(60); } catch (e) { /* visible in state */ }
+    try {
+      const pt = await feed.pollOnce();
+      lastLivePrice = pt.price;
+      applyMark();
+      swarm.say('signal', 'swarm', 'info', `HOSTED DEMO MODE: live feed connected (${pt.source}) — BTC $${pt.price}. Engine + swarm are running in your browser; settlement is paper.`);
+    } catch (e) {
+      swarm.say('signal', 'swarm', 'error', `Live feed unreachable from this browser: ${e.message}. Will keep retrying.`);
+    }
+  }
+
+  setInterval(async () => {
+    try { const pt = await feed.pollOnce(); lastLivePrice = pt.price; } catch (e) { /* keep last */ }
+    if (shock.active && shock.stepsLeft > 0) {
+      shock.offsetPct += shock.direction * shock.stepPct;
+      shock.stepsLeft -= 1;
+      if (shock.stepsLeft <= 0) { shock.active = false; swarm.say('risk', 'swarm', 'info', `Stress shock finished at ${shock.offsetPct.toFixed(1)}% vs live anchor (SIMULATED overlay).`); }
+    }
+    applyMark();
+  }, 3000);
+
+  setInterval(() => {
+    if (!swarm.autoTrade || guard.killSwitch || engine.position) return;
+    if (Date.now() - swarm.lastCycleAt < swarm.cycleCooldownMs) return;
+    const p = effectivePrice();
+    if (p == null) return;
+    swarm.runCycle(feed.history.concat([{ price: p }]), p);
+  }, 5000);
+
+  function state() {
+    const p = effectivePrice();
+    return {
+      now: Date.now(), price: p, livePrice: lastLivePrice,
+      priceSource: feed.lastSource, priceError: feed.lastError,
+      history: feed.history.slice(-120).concat(p != null ? [{ ts: Date.now(), price: p, source: shock.offsetPct !== 0 ? 'live+stress-overlay' : (feed.lastSource || 'live') }] : []),
+      shock: { ...shock, label: shock.offsetPct !== 0 ? `SIMULATED stress overlay ${shock.offsetPct.toFixed(1)}% on live price` : null },
+      engine: engine.snapshot(), guard: guard.snapshot(), guardLog: guard.log.slice(-30), swarm: swarm.snapshot(),
+    };
+  }
+
+  async function nearDemo() {
+    try {
+      const r = await fetch('https://rpc.testnet.near.org', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'demo', method: 'status', params: [] }),
+      });
+      const j = await r.json();
+      return {
+        mode: 'hosted-demo (browser-direct RPC read)',
+        testnet_chain_id: j.result.chain_id,
+        latest_block_height: j.result.sync_info.latest_block_height,
+        latest_block_hash: j.result.sync_info.latest_block_hash,
+        note: 'Live read from this browser just now. Full proof set: docs/NEAR_PROOF.md in the repo.',
+      };
+    } catch (e) {
+      return { mode: 'hosted-demo', error: 'NEAR RPC read failed from this browser: ' + e.message, note: 'See docs/NEAR_PROOF.md in the repo for captured proof.' };
+    }
+  }
+
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async function (url, opts = {}) {
+    const u = String(url);
+    if (!u.startsWith('/api/')) return realFetch(url, opts);
+    const json = obj => new Response(JSON.stringify(obj), { headers: { 'content-type': 'application/json' } });
+    const data = opts.body ? JSON.parse(opts.body) : {};
+    const p = effectivePrice();
+    if (u === '/api/state') return json(state());
+    if (u === '/api/near') return json(await nearDemo());
+    if (u === '/api/cycle') return p == null ? json({ error: 'no live price yet' }) : json(swarm.runCycle(feed.history.concat([{ price: p }]), p));
+    if (u === '/api/stress') {
+      const side = engine.position ? engine.position.side : 'long';
+      const dir = side === 'long' ? -1 : 1;
+      shock = { active: true, direction: dir, stepsLeft: 10, stepPct: 1.8, offsetPct: shock.offsetPct };
+      swarm.say('operator', 'swarm', 'stress', `STRESS TEST started (SIMULATED): adverse move ${dir < 0 ? 'down' : 'up'} ~18% over ~30s against the ${side.toUpperCase()} position, on top of the live price.`);
+      return json({ ok: true, shock });
+    }
+    if (u === '/api/recover') { shock.offsetPct = 0; shock.active = false; shock.stepsLeft = 0; swarm.say('operator', 'swarm', 'info', 'Stress overlay cleared — mark price back to the live anchor.'); applyMark(); return json({ ok: true }); }
+    if (u === '/api/kill') { swarm.setKill(!!data.on, 'operator-ui'); return json({ ok: true, killSwitch: guard.killSwitch }); }
+    if (u === '/api/close') return p == null ? json({ error: 'no live price yet' }) : json({ ok: true, result: swarm.closePosition(p, 'operator-ui') });
+    if (u === '/api/reset') { resetAll(); applyMark(); return json({ ok: true }); }
+    return json({ error: 'unknown endpoint' });
+  };
+
+  // Visible demo-mode banner (honesty in the UI, per build rules).
+  const banner = document.createElement('div');
+  banner.className = 'banner';
+  banner.textContent = 'HOSTED DEMO MODE — the full engine + agent swarm run in your browser on live prices; settlement is paper. For the server build, judges run: npm start (from the public repo).';
+  document.body.insertBefore(banner, document.body.children[1] || null);
+
+  boot();
+})();
+
+</script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const fmt = n => n == null ? '—' : Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const time = ts => new Date(ts).toLocaleTimeString();
+
+async function post(path, data = {}) {
+  const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) });
+  return r.json();
+}
+
+function drawChart(history) {
+  const cv = $('chart'), ctx = cv.getContext('2d');
+  const W = cv.width = cv.clientWidth * 2, H = cv.height = 360;
+  ctx.clearRect(0, 0, W, H);
+  if (!history || history.length < 2) return;
+  const prices = history.map(h => h.price);
+  const min = Math.min(...prices), max = Math.max(...prices), pad = (max - min) * 0.1 || 1;
+  const x = i => i / (prices.length - 1) * (W - 20) + 10;
+  const y = p => H - 20 - (p - min + pad) / (max - min + 2 * pad) * (H - 40);
+  ctx.beginPath();
+  prices.forEach((p, i) => i ? ctx.lineTo(x(i), y(p)) : ctx.moveTo(x(i), y(p)));
+  ctx.strokeStyle = '#00ec97'; ctx.lineWidth = 2.5; ctx.stroke();
+  ctx.fillStyle = '#8b93a7'; ctx.font = '22px system-ui';
+  ctx.fillText('$' + fmt(max), 12, 30);
+  ctx.fillText('$' + fmt(min), 12, H - 12);
+}
+
+async function refresh() {
+  let s;
+  try { s = await (await fetch('/api/state')).json(); } catch (e) { return; }
+  $('price').textContent = s.price != null ? '$' + fmt(s.price) : '—';
+  $('priceMeta').textContent = s.livePrice != null
+    ? `live anchor $${fmt(s.livePrice)} via ${s.priceSource || 'feed'}${s.shock.offsetPct ? ` · stress overlay ${s.shock.offsetPct.toFixed(1)}% (SIMULATED)` : ''}`
+    : `feed error: ${s.priceError || 'connecting…'}`;
+  $('histNote').textContent = s.history.length ? `${s.history.length} real points` : '';
+  drawChart(s.history);
+
+  $('shockBanner').classList.toggle('hidden', !s.shock.label);
+  if (s.shock.label) $('shockBanner').textContent = '⚠ ' + s.shock.label + ' — applied for the protection demo; the live anchor underneath is real.';
+  $('killBanner').classList.toggle('hidden', !s.guard.killSwitch);
+  $('btnKill').textContent = s.guard.killSwitch ? 'Release kill switch' : '⛔ KILL SWITCH';
+
+  const e = s.engine;
+  if (e.position) {
+    const p = e.position;
+    $('position').textContent =
+      `${p.side.toUpperCase()} ${p.sizeBtc} BTC · entry $${fmt(p.entryPrice)} · mark $${fmt(e.markPrice)}\n` +
+      `leverage ${p.leverage}x · margin $${fmt(p.margin)} · liq @ $${fmt(p.liquidationPrice)}\n` +
+      `unrealised PnL: $${fmt(e.unrealisedPnl)}`;
+    const d = e.liquidationDistancePct ?? 0;
+    $('liqGauge').style.width = Math.min(100, d * 3) + '%';
+    $('liqGauge').style.background = d < 7 ? '#ff5d73' : d < 12 ? '#ffb454' : '#00ec97';
+    $('liqText').textContent = `${d.toFixed(2)}% away from liquidation (protection < 12%, force-close < 7%)`;
+  } else {
+    $('position').textContent = 'No open position';
+    $('liqGauge').style.width = '0%';
+    $('liqText').textContent = '—';
+  }
+  $('account').textContent =
+    `wallet (paper) $${fmt(e.walletBalance)} · equity $${fmt(e.equity)} · realised PnL $${fmt(e.realisedPnlTotal)} · fees $${fmt(e.feesPaidTotal)} · liquidations ${e.liquidations}`;
+
+  $('agents').innerHTML = s.swarm.agents.map(a =>
+    `<div class="agent"><b>${a.role}</b> — <span class="st">${a.status}</span><br>` +
+    `<span class="st">${a.nearAccount}</span> · earned (ledger) $${fmt(a.earned)}</div>`).join('');
+  $('ledger').innerHTML = s.swarm.ledger.slice().reverse().map(l =>
+    `<div><span class="t">${time(l.ts)}</span> ${l.from} → <b>${l.to}</b> $${fmt(l.amount)} — ${l.reason}</div>`).join('') || 'no entries yet';
+
+  const g = s.guard;
+  $('guard').textContent =
+    `per-order notional cap $${fmt(g.limits.maxNotionalPerOrder)} · leverage ceiling ${g.limits.maxLeverage}x · min liq distance ${g.limits.minLiquidationDistancePct}% · daily loss limit $${fmt(g.limits.maxDailyRealisedLoss)}\n` +
+    `kill switch: ${g.killSwitch ? 'ENGAGED by ' + g.killedBy : 'off'} · checks logged ${g.checksLogged} · vetoes ${g.vetoes}`;
+  $('guardLog').innerHTML = s.guardLog.slice().reverse().map(l =>
+    `<div><span class="t">${time(l.ts)}</span> [${l.agent}] ${l.verdict}${l.reasons && l.reasons.length ? ' — ' + l.reasons.join('; ') : ''}</div>`).join('') || 'no checks yet';
+
+  $('swarmLog').innerHTML = s.swarm.log.slice().reverse().map(l =>
+    `<div><span class="t">${time(l.ts)}</span> <b>${l.from}</b> → ${l.to} [${l.type}] ${l.text}</div>`).join('') || 'no decisions yet';
+
+  $('intents').innerHTML = s.swarm.intents.slice().reverse().map(i =>
+    `<div><span class="t">${i.ts}</span> settlement intent: ${i.side} ${i.diff['perp:btc-usdt']} BTC @ $${fmt(i.reference_price_usd)} (${i.intent_type})</div>`).join('');
+}
+
+async function refreshNear() {
+  try {
+    const n = await (await fetch('/api/near')).json();
+    $('near').textContent = JSON.stringify(n, null, 1).slice(0, 1800);
+  } catch (e) { $('near').textContent = 'near proof unavailable: ' + e.message; }
+}
+
+$('btnCycle').onclick = async () => { await post('/api/cycle'); refresh(); };
+$('btnStress').onclick = async () => { await post('/api/stress'); refresh(); };
+$('btnRecover').onclick = async () => { await post('/api/recover'); refresh(); };
+$('btnClose').onclick = async () => { await post('/api/close'); refresh(); };
+$('btnReset').onclick = async () => { await post('/api/reset'); refresh(); };
+$('btnKill').onclick = async () => {
+  const s = await (await fetch('/api/state')).json();
+  await post('/api/kill', { on: !s.guard.killSwitch });
+  refresh();
+};
+
+refresh(); refreshNear();
+setInterval(refresh, 2000);
+setInterval(refreshNear, 30000);
+
+</script>
+</body>
+</html>

@@ -106,7 +106,7 @@ In the **2026-01-17 → 2026-02-06** BTC drawdown (**−36.72 %** peak-to-trough
 
 - **Public repository (required home):** this folder is a push-ready git repo. The owner pushes it to a **public GitHub repository** (their account — see SUBMISSION_CHECKLIST.md step 1) before the deadline; judges run it from there with the steps above.
 - **Live hosted demo (no install):** `demo-dist/index.html` is a single self-contained page — the *same* engine, policy and swarm modules running in the browser on the same live price feeds, in a clearly-labelled **hosted demo mode** (banner in the UI). It carries the same dual LIVE ⇄ REPLAY behaviour: the widest-range 240-candle window of the recorded tape is bundled in, so the hosted demo also works fully offline and auto-falls-back to REPLAY if the live feeds are unreachable from the visitor's browser. Build it with `node scripts/build-demo.js`; host it free on GitHub Pages / Netlify / Vercel by publishing the `demo-dist` folder.
-  - A temporary hosted copy is live at: https://muse.ai/files/1322723147599917/1703605014822200/9gokflv8412se9mio8pn0eyp/index.html — **this link expires 2026-11-15T19:46Z** (file-host link, not permanent hosting). The durable judging link is the GitHub Pages copy from the public repo.
+  - The live demo is served from this repository via GitHub Pages: **https://millatmisu27-web.github.io/omniperps-swarm/demo-dist/**
   - In hosted demo mode the NEAR panel does a live testnet RPC status read directly from the browser; the full proof set is docs/NEAR_PROOF.md.
 - **Full stack:** `npm start` (zero dependencies) serves the same console with the server-side NEAR proof module at `http://localhost:4173`.
 

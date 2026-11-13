@@ -128,6 +128,14 @@ read of this contract per decision cycle when started with
 `OMNIPERPS_GUARD_CHAIN=1` (`src/guard-chain.js`; read-only, fail-safe,
 off by default — smoke-tested both ways, see TESTS.md).
 
+*Note (2026-11-13, Wave 2): a partial regression re-run of
+guard-proof.js — started to confirm the `src/near-tx.js` refactor and
+stopped early — added two more signed checks (in-limit allowed, tx
+`F6cKT39adVzFChZZwubcaNgYsHTJ7R1EZEYkvWRcQsVU`, plus one oversize
+denial) before stopping ahead of the kill-switch pair. A direct RPC
+read afterwards confirms the live state: `checks_count = 5`,
+`killed = false`. The run-#1 table above is unchanged history.*
+
 ---
 
 ## What was ATTEMPTED
@@ -249,6 +257,38 @@ settlement — it has not been signed or submitted to Intents.
   contract code on them (code_hash is the empty-hash sentinel); the
   SpendGuard contract lives on its own sub-account,
   `guard.omniperps-swarm.testnet`.
+
+---
+
+## 7. Agent fee settlement — real testnet transfers (Wave 2)
+
+The swarm's FeeLedger (agents earn ledger units for executed
+proposals, reviews and protective actions) is settled **on-chain**:
+`node scripts/settle-fees.js` runs a full headless swarm session,
+takes the resulting ledger balances, and pays them from the master
+as **real NEAR testnet transfers** at a fixed, stated conversion:
+
+> **1 ledger unit = 0.01 testnet NEAR** (`src/settlement.js`).
+> Testnet NEAR has zero real-world value; no mainnet funds exist
+> anywhere in this project.
+
+**Settlement run #1** (recorded in `data/settlements.json`, shown in
+the console's NEAR panel with explorer links). Session ledger:
+Signal 2.00, Risk 21.50, Execution 13.00 units.
+
+| Agent | Paid to | Amount | Transaction |
+|---|---|---|---|
+| Signal | `omniperps-agent1-7f3a.testnet` | **0.0200 NEAR** | [`Fzwj5hDDEBUvPhj4amwckGvdXYxY48CxpjjKoXeQPRpJ`](https://testnet.nearblocks.io/txns/Fzwj5hDDEBUvPhj4amwckGvdXYxY48CxpjjKoXeQPRpJ) |
+| Risk | `omniperps-agent2-7f3a.testnet` | **0.2150 NEAR** | [`6CJihsoCzYSAf8rtj31YCGtvwG53jY8VtG2kq1rn2shN`](https://testnet.nearblocks.io/txns/6CJihsoCzYSAf8rtj31YCGtvwG53jY8VtG2kq1rn2shN) |
+| Execution | `omniperps-swarm.testnet` (the master) | 0.1300 NEAR | **retained by the payer — no self-transfer.** Execution acts under the master account, which is also the payer, so its earnings never leave the paying account; no meaningless master→master transaction was made. |
+
+Balance proof (independent RPC reads): master
+2.986434 → **2.751345 NEAR** (0.235 transferred + gas); agent1
+10.0 → **10.02 NEAR**; agent2 10.0 → **10.215 NEAR**. The annotated
+ledger (every entry with its `settled:` marker) is printed by the
+script and stored in `data/settlements.json`. Reproduce any time:
+`node scripts/settle-fees.js` (needs the demo keys file that lives
+outside this repo; without it the script prints the plan only).
 
 ---
 

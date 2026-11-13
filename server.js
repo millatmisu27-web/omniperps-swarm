@@ -15,6 +15,7 @@ const path = require('path');
 const { PerpEngine } = require('./src/perps');
 const { SpendGuard } = require('./src/policy');
 const { PriceFeed } = require('./src/pricefeed');
+const { ReplayFeed } = require('./src/replayfeed');
 const { Swarm } = require('./src/agents');
 // Optional, env-flagged (OMNIPERPS_GUARD_CHAIN=1): logs one LIVE read of
 // the deployed on-chain SpendGuard contract per decision cycle. Inert
@@ -27,6 +28,53 @@ const PUBLIC = path.join(__dirname, 'public');
 let engine, guard, swarm, feed;
 let shock = { active: false, direction: 0, stepsLeft: 0, stepPct: 0, offsetPct: 0 };
 let lastLivePrice = null;
+
+// --- Dual LIVE ⇄ REPLAY feed management (owner requirement: the demo
+// must work online AND offline). LIVE is the default; REPLAY plays back
+// recorded REAL Kraken candles (data/replay-btc.json) and is entered
+// either manually (console toggle / POST /api/feed-mode) or AUTOMATICALLY
+// after repeated live failures — always announced, never silent.
+let feedMode = 'live';        // 'live' | 'replay'
+let feedAutoSwitched = false; // true when replay was an automatic fallback
+let liveFailures = 0;
+let replayDataCache = null;
+
+function loadReplayData() {
+  if (!replayDataCache) {
+    replayDataCache = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'replay-btc.json'), 'utf8'));
+  }
+  return replayDataCache;
+}
+
+function feedInfo() {
+  return {
+    mode: feedMode,
+    autoSwitched: feedAutoSwitched,
+    label: feedMode === 'replay' ? feed.label() : null,
+    liveFailures,
+  };
+}
+
+async function setFeedMode(mode, { auto = false } = {}) {
+  feedMode = mode;
+  feedAutoSwitched = auto;
+  liveFailures = 0;
+  feed = mode === 'replay' ? new ReplayFeed(loadReplayData()) : new PriceFeed();
+  try { await feed.seedHistory(60); } catch (e) { /* surfaced in state */ }
+  try {
+    const pt = await feed.pollOnce();
+    lastLivePrice = pt.price;
+    applyMark();
+    if (mode === 'replay') {
+      swarm.say('signal', 'swarm', 'info', `${auto ? 'AUTO-FALLBACK: live feed unreachable — switched to' : 'Switched to'} ${feed.label()}. BTC $${pt.price}.`);
+    } else {
+      swarm.say('signal', 'swarm', 'info', `Live feed connected (${pt.source}) — BTC $${pt.price}. History seeded with ${feed.history.length} real points.`);
+    }
+  } catch (e) {
+    swarm.say('signal', 'swarm', 'error', `Feed switch to ${mode} failed at first poll: ${e.message}`);
+    if (mode === 'live' && !auto) { /* stay live; interval keeps retrying */ }
+  }
+}
 
 function resetAll() {
   engine = new PerpEngine({ startingBalance: 100000 });
@@ -57,7 +105,8 @@ async function bootFeed() {
     applyMark();
     swarm.say('signal', 'swarm', 'info', `Live feed connected (${pt.source}) — BTC $${pt.price}. History seeded with ${feed.history.length} real points.`);
   } catch (e) {
-    swarm.say('signal', 'swarm', 'error', `Live feed unreachable at boot: ${e.message}. Will keep retrying.`);
+    swarm.say('signal', 'swarm', 'error', `Live feed unreachable at boot: ${e.message}. AUTO-FALLBACK to REPLAY (recorded real prices) so the demo stays usable offline.`);
+    await setFeedMode('replay', { auto: true });
   }
 }
 
@@ -65,7 +114,17 @@ setInterval(async () => {
   try {
     const pt = await feed.pollOnce();
     lastLivePrice = pt.price;
-  } catch (e) { /* keep last price; error visible in state */ }
+    liveFailures = 0;
+  } catch (e) {
+    if (feedMode === 'live') {
+      liveFailures++;
+      if (liveFailures >= 2) {
+        swarm.say('signal', 'swarm', 'error', `Live feed failed ${liveFailures} polls in a row (${e.message}). AUTO-FALLBACK to REPLAY (recorded real prices).`);
+        await setFeedMode('replay', { auto: true });
+      }
+    }
+    /* in replay mode a poll failure keeps the last price; error in state */
+  }
   if (shock.active && shock.stepsLeft > 0) {
     shock.offsetPct += shock.direction * shock.stepPct;
     shock.stepsLeft -= 1;
@@ -83,6 +142,14 @@ setInterval(() => {
   swarm.runCycle(feed.history.concat([{ price: p }]), p);
 }, 5000);
 
+function loadSettlements() {
+  try {
+    const raw = fs.readFileSync(path.join(__dirname, 'data', 'settlements.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch (e) { return []; }
+}
+
 function state() {
   const p = effectivePrice();
   return {
@@ -91,6 +158,8 @@ function state() {
     livePrice: lastLivePrice,
     priceSource: feed.lastSource,
     priceError: feed.lastError,
+    feed: feedInfo(),
+    settlements: loadSettlements(),
     history: feed.history.slice(-120).concat(p != null ? [{ ts: Date.now(), price: p, source: shock.offsetPct !== 0 ? 'live+stress-overlay' : (feed.lastSource || 'live') }] : []),
     shock: { ...shock, label: shock.offsetPct !== 0 ? `SIMULATED stress overlay ${shock.offsetPct.toFixed(1)}% on live price` : null },
     engine: engine.snapshot(),
@@ -160,6 +229,11 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 200, { ok: true, result: swarm.closePosition(p, 'operator-ui') });
       }
       if (url.pathname === '/api/reset') { resetAll(); applyMark(); return sendJson(res, 200, { ok: true }); }
+      if (url.pathname === '/api/feed-mode') {
+        const mode = data.mode === 'replay' ? 'replay' : 'live';
+        await setFeedMode(mode, { auto: false });
+        return sendJson(res, 200, { ok: true, feed: feedInfo() });
+      }
       return sendJson(res, 404, { error: 'unknown endpoint' });
     }
     // static

@@ -28,11 +28,20 @@ function drawChart(history) {
 async function refresh() {
   let s;
   try { s = await (await fetch('/api/state')).json(); } catch (e) { return; }
+  const feedMode = s.feed ? s.feed.mode : 'live';
+  const inReplay = feedMode === 'replay';
   $('price').textContent = s.price != null ? '$' + fmt(s.price) : '—';
   $('priceMeta').textContent = s.livePrice != null
-    ? `live anchor $${fmt(s.livePrice)} via ${s.priceSource || 'feed'}${s.shock.offsetPct ? ` · stress overlay ${s.shock.offsetPct.toFixed(1)}% (SIMULATED)` : ''}`
+    ? inReplay
+      ? `${s.feed.label || 'REPLAY — recorded real prices'}${s.shock.offsetPct ? ` · stress overlay ${s.shock.offsetPct.toFixed(1)}% (SIMULATED)` : ''}`
+      : `live anchor $${fmt(s.livePrice)} via ${s.priceSource || 'feed'}${s.shock.offsetPct ? ` · stress overlay ${s.shock.offsetPct.toFixed(1)}% (SIMULATED)` : ''}`
     : `feed error: ${s.priceError || 'connecting…'}`;
+  $('chartTitle').textContent = inReplay ? 'Price — REPLAY of recorded real feed' : 'Live price (real feed)';
   $('histNote').textContent = s.history.length ? `${s.history.length} real points` : '';
+  $('replayBanner').classList.toggle('hidden', !inReplay);
+  if (inReplay) $('replayBanner').textContent = `↺ ${s.feed.label || 'REPLAY — recorded real prices'}${s.feed.autoSwitched ? ' · entered automatically: live feed unreachable' : ' · selected manually'} — the prices are real recorded market data, not live and not simulated. Switch back with the LIVE button.`;
+  $('btnLive').disabled = !inReplay;
+  $('btnReplay').disabled = inReplay;
   drawChart(s.history);
 
   $('shockBanner').classList.toggle('hidden', !s.shock.label);
@@ -77,6 +86,17 @@ async function refresh() {
 
   $('intents').innerHTML = s.swarm.intents.slice().reverse().map(i =>
     `<div><span class="t">${i.ts}</span> settlement intent: ${i.side} ${i.diff['perp:btc-usdt']} BTC @ $${fmt(i.reference_price_usd)} (${i.intent_type})</div>`).join('');
+
+  const runs = s.settlements || [];
+  if (runs.length) {
+    const run = runs[runs.length - 1];
+    $('settlements').innerHTML =
+      `<div>Settlement run ${run.settledAt} — ledger earnings paid on NEAR testnet at ${run.nearPerLedgerUnit} NEAR per ledger unit (testnet NEAR, no real-world value). Ledger at settlement: ` +
+      Object.entries(run.ledgerBalances).map(([a, v]) => `${a} $${fmt(v)}`).join(' · ') + `</div>` +
+      run.payments.map(p => p.txHash
+        ? `<div><span class="t">${p.agent}</span> → ${p.toAccount} — ${p.amountNear} NEAR · <a href="https://testnet.nearblocks.io/txns/${p.txHash}" target="_blank" rel="noopener">tx ${p.txHash.slice(0, 12)}…</a> (settled)</div>`
+        : `<div><span class="t">${p.agent}</span> → ${p.toAccount} — ${p.note || 'not transferred'}</div>`).join('');
+  }
 }
 
 async function refreshNear() {
@@ -86,6 +106,8 @@ async function refreshNear() {
   } catch (e) { $('near').textContent = 'near proof unavailable: ' + e.message; }
 }
 
+$('btnLive').onclick = async () => { await post('/api/feed-mode', { mode: 'live' }); refresh(); };
+$('btnReplay').onclick = async () => { await post('/api/feed-mode', { mode: 'replay' }); refresh(); };
 $('btnCycle').onclick = async () => { await post('/api/cycle'); refresh(); };
 $('btnStress').onclick = async () => { await post('/api/stress'); refresh(); };
 $('btnRecover').onclick = async () => { await post('/api/recover'); refresh(); };

@@ -48,6 +48,13 @@ function serializeFunctionCallAction({ methodName, args, gas, deposit }) {
     .build();
 }
 
+function serializeTransferAction({ deposit }) {
+  return new Writer()
+    .u8(3) // Action enum: Transfer
+    .u128(deposit)
+    .build();
+}
+
 function serializeTransaction({ signerId, publicKeyBytes, nonce, receiverId, blockHashBytes, actions }) {
   const w = new Writer()
     .string(signerId)
@@ -74,9 +81,9 @@ function keyObjectsFromNearSecret(secretKeyString) {
 }
 
 // ---------------------------------------------------------------------------
-// High-level: one signed FunctionCall, broadcast, final outcome returned
+// High-level: sign + broadcast a transaction with the given actions
 // ---------------------------------------------------------------------------
-async function callFunctionSigned({ signerId, secretKeyString, publicKeyString, contractId, methodName, args, gas = 30_000_000_000_000n, deposit = 0n, rpcUrl = TESTNET_RPC }) {
+async function submitActions({ signerId, secretKeyString, publicKeyString, receiverId, actions, rpcUrl = TESTNET_RPC }) {
   const { privateKey, publicKeyBytes } = keyObjectsFromNearSecret(secretKeyString);
   const expectedPub = base58Decode(publicKeyString.replace(/^ed25519:/, ''));
   if (!expectedPub.equals(Buffer.from(publicKeyBytes))) throw new Error('secret key does not match the given public key');
@@ -88,10 +95,9 @@ async function callFunctionSigned({ signerId, secretKeyString, publicKeyString, 
   const block = await rpc(rpcUrl, 'block', { finality: 'final' });
   const blockHashBytes = base58Decode(block.header.hash);
 
-  const action = serializeFunctionCallAction({ methodName, args, gas, deposit });
   const txBytes = serializeTransaction({
     signerId, publicKeyBytes, nonce: BigInt(accessKey.nonce) + 1n,
-    receiverId: contractId, blockHashBytes, actions: [action],
+    receiverId, blockHashBytes, actions,
   });
   const txHash = crypto.createHash('sha256').update(txBytes).digest();
   const signature = crypto.sign(null, txHash, privateKey);
@@ -101,6 +107,18 @@ async function callFunctionSigned({ signerId, secretKeyString, publicKeyString, 
     signed_tx_base64: signedTxBytes.toString('base64'), wait_until: 'FINAL',
   });
   return { txHash: base58EncodeTxHash(txHash), outcome };
+}
+
+async function callFunctionSigned({ signerId, secretKeyString, publicKeyString, contractId, methodName, args, gas = 30_000_000_000_000n, deposit = 0n, rpcUrl = TESTNET_RPC }) {
+  const action = serializeFunctionCallAction({ methodName, args, gas, deposit });
+  return submitActions({ signerId, secretKeyString, publicKeyString, receiverId: contractId, actions: [action], rpcUrl });
+}
+
+/** Plain NEAR transfer (one Transfer action). amountYocto is a BigInt. */
+async function transferSigned({ signerId, secretKeyString, publicKeyString, receiverId, amountYocto, rpcUrl = TESTNET_RPC }) {
+  if (!(BigInt(amountYocto) > 0n)) throw new Error('transfer amount must be > 0');
+  const action = serializeTransferAction({ deposit: BigInt(amountYocto) });
+  return submitActions({ signerId, secretKeyString, publicKeyString, receiverId, actions: [action], rpcUrl });
 }
 
 function base58EncodeTxHash(buf) {
@@ -123,4 +141,4 @@ function functionCallResult(outcome) {
   return null;
 }
 
-module.exports = { callFunctionSigned, functionCallResult, keyObjectsFromNearSecret };
+module.exports = { callFunctionSigned, transferSigned, functionCallResult, keyObjectsFromNearSecret };

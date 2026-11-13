@@ -6,17 +6,33 @@
  *      BEFORE liquidation -> kill switch blocks a new cycle
  *   -> final settlement + agent fee ledger.
  *
- * Run: npm run demo
+ * Run: npm run demo            (live feed)
+ *      npm run demo -- --replay (REPLAY mode: recorded REAL Kraken
+ *                               candles from data/replay-btc.json —
+ *                               zero network dependence)
  * Uses the live feed when reachable; if the network blocks it, falls
  * back to a clearly-labelled scripted price path so the flow can
  * still be verified offline.
  */
+const fs = require('node:fs');
+const path = require('node:path');
 const { PerpEngine } = require('../src/perps');
 const { SpendGuard } = require('../src/policy');
 const { PriceFeed } = require('../src/pricefeed');
+const { ReplayFeed } = require('../src/replayfeed');
 const { Swarm } = require('../src/agents');
 
 const line = () => console.log('-'.repeat(72));
+const REPLAY = process.argv.includes('--replay');
+
+async function getReplayHistory() {
+  const data = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'data', 'replay-btc.json'), 'utf8'));
+  const feed = new ReplayFeed(data);
+  await feed.seedHistory(60);
+  const pt = await feed.pollOnce();
+  console.log(`REPLAY MODE: ${feed.label()}; history ${feed.history.length} points, now playing $${pt.price}`);
+  return { history: feed.history.map(h => ({ price: h.price })), live: false, replay: true, price: pt.price };
+}
 
 async function getHistory(feed) {
   try {
@@ -33,10 +49,9 @@ async function getHistory(feed) {
 }
 
 (async () => {
-  console.log('OmniPerps Swarm — end-to-end demo');
+  console.log(`OmniPerps Swarm — end-to-end demo${REPLAY ? ' (REPLAY MODE — recorded real prices, no network needed)' : ''}`);
   line();
-  const feed = new PriceFeed();
-  const { history, price } = await getHistory(feed);
+  const { history, price } = REPLAY ? await getReplayHistory() : await getHistory(new PriceFeed());
 
   const engine = new PerpEngine({ startingBalance: 100000 });
   const guard = new SpendGuard();

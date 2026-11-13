@@ -1,0 +1,42 @@
+[
+  {
+    "settledAt": "2026-11-13T20:42:36.710Z",
+    "network": "NEAR testnet",
+    "payer": "omniperps-swarm.testnet",
+    "nearPerLedgerUnit": 0.01,
+    "conversionNote": "Ledger units are the swarm-internal fee accounting (shown as $ in the console). They are settled on NEAR testnet at the fixed stated rate of 0.01 testnet NEAR per unit. Testnet NEAR has zero real-world value; no mainnet funds are involved.",
+    "sessionSource": "headless swarm session on REPLAY prices (recorded real Kraken candles, data/replay-btc.json): position opened by the swarm, protection ladder fired under the labelled simulated stress, 0 liquidations",
+    "ledgerBalances": {
+      "signal": 2,
+      "risk": 21.5,
+      "execution": 13
+    },
+    "payments": [
+      {
+        "agent": "signal",
+        "toAccount": "omniperps-agent1-7f3a.testnet",
+        "ledgerUnits": 2,
+        "amountNear": "0.0200",
+        "txHash": "Fzwj5hDDEBUvPhj4amwckGvdXYxY48CxpjjKoXeQPRpJ"
+      },
+      {
+        "agent": "risk",
+        "toAccount": "omniperps-agent2-7f3a.testnet",
+        "ledgerUnits": 21.5,
+        "amountNear": "0.2150",
+        "txHash": "6CJihsoCzYSAf8rtj31YCGtvwG53jY8VtG2kq1rn2shN"
+      },
+      {
+        "agent": "execution",
+        "toAccount": "omniperps-swarm.testnet",
+        "ledgerUnits": 13,
+        "amountNear": "0.1300",
+        "txHash": null,
+        "note": "Execution acts under the master account (the payer). Its earnings are retained by the payer — no self-transfer is made."
+      }
+    ],
+    "totalTransferredNear": "0.2350",
+    "masterBalanceBefore": "2.986434",
+    "masterBalanceAfter": "2.751345"
+  }
+]

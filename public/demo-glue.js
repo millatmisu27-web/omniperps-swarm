@@ -17,11 +17,20 @@
   const { PerpEngine } = window.__mods.perps;
   const { SpendGuard } = window.__mods.policy;
   const { PriceFeed } = window.__mods.pricefeed;
+  const { ReplayFeed } = window.__mods.replayfeed || {};
   const { Swarm } = window.__mods.agents;
 
   let engine, guard, swarm, feed;
   let shock = { active: false, direction: 0, stepsLeft: 0, stepPct: 0, offsetPct: 0 };
   let lastLivePrice = null;
+
+  // Dual LIVE ⇄ REPLAY, same contract as the server build: LIVE is the
+  // default, REPLAY (recorded real prices, trimmed window bundled with
+  // this page) is a manual toggle or an automatic fallback — announced.
+  let feedMode = 'live';
+  let feedAutoSwitched = false;
+  let liveFailures = 0;
+  const feedInfo = () => ({ mode: feedMode, autoSwitched: feedAutoSwitched, label: feedMode === 'replay' && feed.label ? feed.label() : null, liveFailures });
 
   function resetAll() {
     engine = new PerpEngine({ startingBalance: 100000 });
@@ -42,6 +51,28 @@
     swarm.onPrice(p);
   }
 
+  async function setFeedMode(mode, { auto = false } = {}) {
+    if (mode === 'replay' && (!ReplayFeed || !window.__replayData)) {
+      swarm.say('signal', 'swarm', 'error', 'REPLAY is not bundled into this hosted copy — staying on the live feed.');
+      return;
+    }
+    feedMode = mode;
+    feedAutoSwitched = auto;
+    liveFailures = 0;
+    feed = mode === 'replay' ? new ReplayFeed(window.__replayData) : new PriceFeed();
+    try { await feed.seedHistory(60); } catch (e) { /* visible in state */ }
+    try {
+      const pt = await feed.pollOnce();
+      lastLivePrice = pt.price;
+      applyMark();
+      swarm.say('signal', 'swarm', 'info', mode === 'replay'
+        ? `${auto ? 'AUTO-FALLBACK: live feed unreachable — switched to' : 'Switched to'} ${feed.label()}. BTC $${pt.price}.`
+        : `Live feed connected (${pt.source}) — BTC $${pt.price}. History seeded with ${feed.history.length} real points.`);
+    } catch (e) {
+      swarm.say('signal', 'swarm', 'error', `Feed switch to ${mode} failed at first poll: ${e.message}`);
+    }
+  }
+
   async function boot() {
     try { await feed.seedHistory(60); } catch (e) { /* visible in state */ }
     try {
@@ -50,12 +81,18 @@
       applyMark();
       swarm.say('signal', 'swarm', 'info', `HOSTED DEMO MODE: live feed connected (${pt.source}) — BTC $${pt.price}. Engine + swarm are running in your browser; settlement is paper.`);
     } catch (e) {
-      swarm.say('signal', 'swarm', 'error', `Live feed unreachable from this browser: ${e.message}. Will keep retrying.`);
+      swarm.say('signal', 'swarm', 'error', `Live feed unreachable from this browser: ${e.message}. AUTO-FALLBACK to REPLAY (recorded real prices).`);
+      await setFeedMode('replay', { auto: true });
     }
   }
 
   setInterval(async () => {
-    try { const pt = await feed.pollOnce(); lastLivePrice = pt.price; } catch (e) { /* keep last */ }
+    try { const pt = await feed.pollOnce(); lastLivePrice = pt.price; liveFailures = 0; } catch (e) {
+      if (feedMode === 'live' && ++liveFailures >= 2) {
+        swarm.say('signal', 'swarm', 'error', `Live feed failed ${liveFailures} polls in a row (${e.message}). AUTO-FALLBACK to REPLAY (recorded real prices).`);
+        await setFeedMode('replay', { auto: true });
+      }
+    }
     if (shock.active && shock.stepsLeft > 0) {
       shock.offsetPct += shock.direction * shock.stepPct;
       shock.stepsLeft -= 1;
@@ -77,6 +114,8 @@
     return {
       now: Date.now(), price: p, livePrice: lastLivePrice,
       priceSource: feed.lastSource, priceError: feed.lastError,
+      feed: feedInfo(),
+      settlements: window.__settlements || [],
       history: feed.history.slice(-120).concat(p != null ? [{ ts: Date.now(), price: p, source: shock.offsetPct !== 0 ? 'live+stress-overlay' : (feed.lastSource || 'live') }] : []),
       shock: { ...shock, label: shock.offsetPct !== 0 ? `SIMULATED stress overlay ${shock.offsetPct.toFixed(1)}% on live price` : null },
       engine: engine.snapshot(), guard: guard.snapshot(), guardLog: guard.log.slice(-30), swarm: swarm.snapshot(),
@@ -123,6 +162,7 @@
     if (u === '/api/kill') { swarm.setKill(!!data.on, 'operator-ui'); return json({ ok: true, killSwitch: guard.killSwitch }); }
     if (u === '/api/close') return p == null ? json({ error: 'no live price yet' }) : json({ ok: true, result: swarm.closePosition(p, 'operator-ui') });
     if (u === '/api/reset') { resetAll(); applyMark(); return json({ ok: true }); }
+    if (u === '/api/feed-mode') { await setFeedMode(data.mode === 'replay' ? 'replay' : 'live', { auto: false }); return json({ ok: true, feed: feedInfo() }); }
     return json({ error: 'unknown endpoint' });
   };
 

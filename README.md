@@ -1,5 +1,7 @@
 # OmniPerps Swarm
 
+[![tests](https://github.com/millatmisu27-web/omniperps-swarm/actions/workflows/tests.yml/badge.svg)](https://github.com/millatmisu27-web/omniperps-swarm/actions)
+
 **Give AI a trading desk — but never the keys to the vault.** A three-agent swarm (Signal, Risk, Execution) trades a BTC perpetual on live prices. Signal proposes, Risk can veto, Execution acts only with an approval — and a NEAR-anchored SpendGuard policy with a global kill switch bounds everything the swarm can do.
 
 Built at **NEAR HACKATHON** (Nov 2026). Tracks: **Unstoppable DeFi** (primary) · **AI Swarms** · **Agent Economy** · **AI Security & Defense**.
@@ -14,7 +16,9 @@ Autonomous trading agents are easy to build and dangerous to trust: one bad mode
 - **Signal Agent** watches the live feed (EMA momentum) and proposes trades *with its reasoning shown*.
 - **Risk Agent** is independent: it re-checks every proposal against the SpendGuard policy and the live liquidation distance. It can **approve, halve, or veto** — and on an open position it **force-reduces and force-closes before liquidation** (protection at <12% distance, force-close at <7%).
 - **Execution Agent** is the only agent that can touch the engine, and only with a Risk approval; it re-checks the guard itself immediately before acting.
-- **Agent Economy:** agents earn per completed task from a protocol fee pool (Signal per executed proposal, Risk per review + protection bonus, Execution per order) in a visible fee ledger — the swarm's internal labour market.
+- **Agent Economy — with real on-chain settlement:** agents earn per completed task from a protocol fee pool (Signal per executed proposal, Risk per review + protection bonus, Execution per order) in a visible fee ledger — the swarm's internal labour market. The ledger **settles on NEAR testnet for real**: `node scripts/settle-fees.js` pays each agent's earnings from the swarm master as actual testnet transfers at a fixed stated conversion (1 ledger unit = 0.01 testnet NEAR; tx hashes in docs/NEAR_PROOF.md §7, shown in the console's NEAR panel).
+- **Works online AND offline — LIVE ⇄ REPLAY:** the console defaults to the live feed; if every live source fails it **automatically switches to REPLAY** — recorded *real* Kraken BTC/USD 1-minute candles (`data/replay-btc.json`, 721 candles captured 2026-11-13) — behind a banner that says so, and a **LIVE ⇄ REPLAY toggle** lets anyone switch manually (e.g. to show protection on demand). `npm run demo -- --replay` runs the full headless demo on the recorded prices with zero network.
+- **Backtest evidence:** `node scripts/backtest.js` replays the protection ladder over a real historical crash (docs/BACKTEST.md) — same entry, same prices, protected vs unprotected.
 - **SpendGuard (AI Security):** per-order notional cap ($25k), leverage ceiling (10x), minimum liquidation distance (12%), daily loss limit ($5k) — and a **global kill switch** that halts all agents instantly. Every check, pass or veto, is written to an audit log.
 - **NEAR layer (live, with proof):** three swarm accounts were **created and funded on NEAR testnet** — master `omniperps-swarm.testnet` + two agent accounts, 10 NEAR each, creation tx hashes in **docs/NEAR_PROOF.md** — and all state is read via plain JSON-RPC in `src/near-proof.js` (zero dependencies). Using NEAR Chain Signatures' official epsilon derivation, the swarm master deterministically controls EVM address **`0x28ece91f7e9506d4c6f6a8d36db270d4ec1a688d`** (path `ethereum-1`) — a derivation the live testnet MPC contract (`v1.signer-prod.testnet`) confirms byte-for-byte via its own `derived_public_key` view. **A real MPC signature has since been requested from that contract and cryptographically verified**: ecrecover over the signed demo payload reproduces exactly that EVM address (sign tx `E9TZrQ3wVWFSoED61XKi1HowPi6w4XB5fDnMykWZpX8b`; reproduce with `node scripts/mpc-proof.js`). The **SpendGuard policy is also deployed as a real NEAR testnet contract** (`guard.omniperps-swarm.testnet`, near-sdk-js) mirroring `src/policy.js`, and is exercised live — in-limit allowed, oversize denied, kill switch denies (reproduce with `node scripts/guard-proof.js`). Every executed order also produces a **NEAR Intents-style settlement intent** (`token_diff`). Honest limits: no intent has been executed on Intents mainnet, and no EVM transaction has been broadcast from the derived address.
 
@@ -38,16 +42,32 @@ Autonomous trading agents are easy to build and dangerous to trust: one bad mode
                     + fee ledger payment to each agent
 ```
 
+## Screenshots (real captures of the running console)
+
+![Swarm console with a live position open](docs/images/console-overview.png)
+*The console on the live Kraken feed: LONG 0.1306 BTC open, liquidation-distance gauge, propose → approve (reduced) → execute in the decision log, and the on-chain fee-settlement record in the NEAR panel.*
+
+![Stress test — Risk protection firing](docs/images/stress-protection.png)
+*The labelled simulated stress drives the mark down; the Risk Agent force-reduces 50 % at 11.7 % liquidation distance — before liquidation (liquidations: 0).*
+
+![Kill switch engaged](docs/images/kill-switch.png)
+*Kill switch engaged: banner up, all agents halted, and the decision cycle is skipped and logged ("Cycle skipped: kill switch engaged").*
+
+![Replay mode](docs/images/replay-mode.png)
+*REPLAY mode: recorded real Kraken prices (captured 2026-11-13) behind a clear banner — the demo works offline, and the same toggle lets anyone replay the tape on demand.*
+
 ## For judges — do X, see Y
 
 Prerequisite: Node.js ≥ 18. **No dependencies to install** (zero-dependency by design).
 
 1. **Run the test suite** — `npm test`
-   → *See:* 21/21 tests pass — margin & liquidation math, PnL, policy vetoes (oversize, leverage, fragile liquidation distance, kill switch), and the full swarm protection flow.
+   → *See:* 27/27 tests pass — margin & liquidation math, PnL, policy vetoes (oversize, leverage, fragile liquidation distance, kill switch), the full swarm protection flow, replay-feed stepping on the recorded candles, and settlement conversion math.
 2. **Run the headless end-to-end demo** — `npm run demo`
    → *See:* the swarm reads the **live** BTC price, opens a BTC-PERP position through propose → approve → execute (printed transcript), a labelled simulated stress then drives the price against the position and the **Risk Agent force-reduces and force-closes before any liquidation** (liquidations: 0), the **kill switch blocks** a further cycle, and the final paper account + agent fee ledger print.
+2b. **Run it offline** — `npm run demo -- --replay`
+   → *See:* the identical demo on **recorded real prices** (Kraken 1-minute candles captured 2026-11-13, `data/replay-btc.json`), labelled REPLAY in the output, no network needed. This is also what CI runs (`.github/workflows/tests.yml`).
 3. **Open the swarm console** — `npm start`, then visit `http://localhost:4173`
-   → *See:* live price chart (real feed, source labelled), the swarm auto-trading, position/PnL/liquidation-distance gauge, agent cards with ledger earnings, the full decision log, and the guard panel.
+   → *See:* live price chart (real feed, source labelled), the swarm auto-trading, position/PnL/liquidation-distance gauge, agent cards with ledger earnings, the full decision log, the guard panel, the on-chain fee-settlement record in the NEAR panel — and the **LIVE ⇄ REPLAY toggle**: click REPLAY to watch the swarm work through the recorded real tape; if the live feed ever dies, the console switches to REPLAY automatically and banners it.
 4. **In the console, click "Stress test"** while a position is open
    → *See:* a clearly-labelled simulated adverse move (~−18%) on top of the live anchor; Risk protection fires in the log; the position is cut down and closed **before** the liquidation price.
 5. **Click "KILL SWITCH"**, then "Run decision cycle"
@@ -58,6 +78,10 @@ Prerequisite: Node.js ≥ 18. **No dependencies to install** (zero-dependency by
    → *See:* the script re-fetches the sign transaction (`E9TZrQ3wVWFSoED61XKi1HowPi6w4XB5fDnMykWZpX8b`) live from testnet RPC, extracts the signature the MPC network returned, and verifies it — ECDSA against the derived public key **and** Ethereum ecrecover — concluding `MPC SIGNATURE VERIFIED ... 0x28ece91f7e9506d4c6f6a8d36db270d4ec1a688d`.
 8. **Exercise the deployed SpendGuard contract** — `node scripts/guard-proof.js`
    → *See:* the live state of `guard.omniperps-swarm.testnet` read from testnet. With the demo keys file (coordinator-held, outside the repo) it also runs the signed checks: in-limit → allowed, oversize → denied, kill switch on → denied, then off again.
+9. **See the agents get paid on-chain** — settlement run #1 is recorded in `data/settlements.json` and docs/NEAR_PROOF.md §7
+   → *See:* real testnet transfers from the master: Signal **0.0200 NEAR** (tx `Fzwj5hDDEBUvPhj4amwckGvdXYxY48CxpjjKoXeQPRpJ`), Risk **0.2150 NEAR** (tx `6CJihsoCzYSAf8rtj31YCGtvwG53jY8VtG2kq1rn2shN`); Execution's 0.1300 NEAR share is retained by the payer (Execution acts under the master account — no self-transfer). Balances moved accordingly (agent1 10 → 10.02, agent2 10 → 10.215 NEAR). Re-run with `node scripts/settle-fees.js` (demo keys file required to sign; without it, the script prints the settlement plan only).
+10. **Read the backtest** — `docs/BACKTEST.md` (re-run: `node scripts/backtest.js`)
+    → *See:* over the real 2026-01-17 → 2026-02-06 BTC drawdown (−36.72 %, Kraken daily candles), the **unprotected** position was **liquidated** (−$1,801 = 100 % of margin) while the **swarm-protected** position was cut down and closed by the ladder with **−$877.48** (48.7 % of margin) and no liquidation.
 
 ## Live vs simulated — stated plainly
 
@@ -71,11 +95,17 @@ Prerequisite: Node.js ≥ 18. **No dependencies to install** (zero-dependency by
 | Chain Signatures | **SIGNATURE PRODUCED + VERIFIED** — the master's EVM address for path `ethereum-1` is derived client-side with the official epsilon derivation and confirmed byte-identical by the testnet MPC contract's `derived_public_key` view; then a **real `sign` request** was submitted to `v1.signer-prod.testnet` (tx `E9TZrQ3wVWFSoED61XKi1HowPi6w4XB5fDnMykWZpX8b`) and the returned signature **verifies**: ecrecover over the signed payload (sha256 of a labelled demo message) reproduces the derived address. Reproduce: `node scripts/mpc-proof.js`. The signature was over a demo payload digest — no EVM transaction has been broadcast from the derived address. |
 | SpendGuard contract | **DEPLOYED on testnet** — `guard.omniperps-swarm.testnet` (near-sdk-js, source in `contracts/spendguard/`), state mirroring `src/policy.js` exactly, owner = swarm master. Live checks proven on-chain: in-limit allowed, oversize denied, kill switch denies (tx hashes in docs/NEAR_PROOF.md; reproduce: `node scripts/guard-proof.js`). The swarm's runtime enforcement is still the identical off-chain module by default; the server can log one live contract read per cycle with `OMNIPERPS_GUARD_CHAIN=1`. |
 | NEAR Intents | The swarm **produces** an Intents-style `token_diff` settlement intent per executed order. It is **not executed** on Intents mainnet (Intents has no testnet — HACKATHON.md Q-007). |
+| Replay mode | **RECORDED REAL prices** — 721 Kraken BTC/USD 1-minute candles captured 2026-11-13 08:38–20:38 UTC into `data/replay-btc.json` (window range $68,042.30–$70,190.10), played back by `src/replayfeed.js`. Entered manually (console toggle / `npm run demo -- --replay`) or automatically when the live feed fails; always banner-labelled "REPLAY". Not live, and not simulated — it is a recording. The hosted demo bundles the widest-range 240-candle window of the same recording. |
+| Agent fee settlement | **REAL testnet transfers** — the fee ledger settles from the master at 1 ledger unit = 0.01 testnet NEAR (`src/settlement.js`, `scripts/settle-fees.js`): Signal 0.0200 NEAR and Risk 0.2150 NEAR actually moved on NEAR testnet (tx hashes in docs/NEAR_PROOF.md §7); Execution's share is retained by the payer (same account). Testnet NEAR has zero real-world value. |
+
+## Backtest — the protection claim, checked against a real crash
+
+In the **2026-01-17 → 2026-02-06** BTC drawdown (**−36.72 %** peak-to-trough, Kraken daily candles), an identical long position (0.0947 BTC ×5, opened at the peak day's close through the swarm's own sizing machinery) was **liquidated on 2026-01-31, losing 100 % of its $1,801 margin** when held unprotected — while the **swarm-protected** path was force-reduced five times and force-closed by the Risk ladder on 2026-01-30, losing **$877.48 (48.7 % of margin)** with **zero liquidations**. Full methodology, numbers table and chart: **docs/BACKTEST.md** (re-run: `node scripts/backtest.js`).
 
 ## Deployment
 
 - **Public repository (required home):** this folder is a push-ready git repo. The owner pushes it to a **public GitHub repository** (their account — see SUBMISSION_CHECKLIST.md step 1) before the deadline; judges run it from there with the steps above.
-- **Live hosted demo (no install):** `demo-dist/index.html` is a single self-contained page — the *same* engine, policy and swarm modules running in the browser on the same live price feeds, in a clearly-labelled **hosted demo mode** (banner in the UI). Build it with `node scripts/build-demo.js`; host it free on GitHub Pages / Netlify / Vercel by publishing the `demo-dist` folder.
+- **Live hosted demo (no install):** `demo-dist/index.html` is a single self-contained page — the *same* engine, policy and swarm modules running in the browser on the same live price feeds, in a clearly-labelled **hosted demo mode** (banner in the UI). It carries the same dual LIVE ⇄ REPLAY behaviour: the widest-range 240-candle window of the recorded tape is bundled in, so the hosted demo also works fully offline and auto-falls-back to REPLAY if the live feeds are unreachable from the visitor's browser. Build it with `node scripts/build-demo.js`; host it free on GitHub Pages / Netlify / Vercel by publishing the `demo-dist` folder.
   - A temporary hosted copy is live at: https://muse.ai/files/1322723147599917/1703605014822200/9gokflv8412se9mio8pn0eyp/index.html — **this link expires 2026-11-15T19:46Z** (file-host link, not permanent hosting). The durable judging link is the GitHub Pages copy from the public repo.
   - In hosted demo mode the NEAR panel does a live testnet RPC status read directly from the browser; the full proof set is docs/NEAR_PROOF.md.
 - **Full stack:** `npm start` (zero dependencies) serves the same console with the server-side NEAR proof module at `http://localhost:4173`.
@@ -93,15 +123,22 @@ src/perps.js         PerpEngine — margin / PnL / liquidation math
 src/policy.js        SpendGuard — limits, vetoes, kill switch, audit log
 src/agents.js        Signal / Risk / Execution + fee ledger + intents
 src/pricefeed.js     live price feed with source fallback chain
+src/replayfeed.js    REPLAY playback of recorded real candles (data/replay-btc.json)
+src/settlement.js    fee-ledger -> testnet NEAR conversion + settlement planning
 src/near-proof.js    NEAR testnet RPC reads + derivation (see docs/NEAR_PROOF.md)
 src/near-tx.js       minimal signed-transaction client (Borsh + Ed25519, built-ins only)
 src/guard-chain.js   optional live read of the on-chain SpendGuard per cycle (env flag)
 contracts/spendguard/  SpendGuard contract (near-sdk-js) deployed to guard.omniperps-swarm.testnet
-scripts/demo-cli.js  headless end-to-end demo (npm run demo)
+scripts/demo-cli.js  headless end-to-end demo (npm run demo [-- --replay])
+scripts/settle-fees.js pay the agents' ledger earnings as real testnet transfers
+scripts/backtest.js  protection backtest on a real historical drawdown (docs/BACKTEST.md)
 scripts/mpc-proof.js   verify the real MPC signature against the live sign tx (zero-dep)
 scripts/guard-proof.js exercise the deployed SpendGuard contract live (zero-dep)
+data/replay-btc.json   recorded REAL Kraken 1m candles for REPLAY mode
+data/settlements.json  on-chain fee settlement records (tx hashes)
 tools/near-tools/      tooling-only scripts (near-api-js): mpc-sign.js, deploy-guard.js
-tests/               21 tests (npm test)
+.github/workflows/     CI: npm test + replay demo on push/PR
+tests/               27 tests (npm test)
 TESTS.md             captured test + demo output
 DEMO_SCRIPT.md       60–90s demo video script for the X post
 SUBMISSION_CHECKLIST.md  the remaining human-only submission steps

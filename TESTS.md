@@ -57,3 +57,48 @@ get_state after: checks_count=3, killed=false — PASS (all 3 checks recorded; k
 Flag ON, after POST /api/cycle the swarm transcript gains (live testnet read):
   "On-chain SpendGuard [api-cycle]: LIVE testnet read of guard.omniperps-swarm.testnet — killed=false, checks_count=3, caps: $25000/order, 10x, min liq distance 12%, daily loss $5000."
 Flag OFF (default): no such entries; demo behaviour unchanged. The read is fire-and-forget and fail-safe — a failed RPC read logs to the server console only.
+
+---
+
+# Wave 2 verification — captured 2026-11-13 ~20:38–21:00 UTC
+
+## npm test (grew 21 -> 27: +3 replay-feed, +3 settlement-math)
+ℹ tests 27
+ℹ pass 27
+ℹ fail 0
+
+## npm run demo (live) — PASS
+DEMO RESULT: PASS — position opened by the swarm, protection acted before liquidation, kill switch blocked trading
+
+## npm run demo -- --replay (offline, recorded real Kraken candles)
+REPLAY MODE: REPLAY — recorded real prices (Kraken XBTUSD (BTC/USD), 1m candles, captured 2026-11-13T20:38:52Z)
+Position opened on the recorded tape @ $69,025.10; protection ladder fired under the labelled simulated stress; kill switch blocked; DEMO RESULT: PASS.
+
+## Server LIVE ⇄ REPLAY toggle (manual, via /api/feed-mode)
+- boot: mode live, source kraken, BTC $68,818.6
+- POST {mode:"replay"} -> mode replay, source replay, banner label "REPLAY — recorded real prices (Kraken XBTUSD (BTC/USD), 1m candles, captured 2026-11-13T20:38:52Z)", recorded prices stepping
+- POST {mode:"live"} -> back to live/Kraken
+
+## Hosted demo (demo-dist) — headless-browser verified
+- Page boots the in-browser glue with no page errors; initial mode came up REPLAY with autoSwitched=true: from a file:// origin the live cross-origin fetches are blocked, so the AUTO-FALLBACK fired exactly as designed (over HTTPS hosting the live feed gets its normal chance first).
+- Manual REPLAY toggle: banner visible with the recorded-prices label; settlements section renders run #1; back to LIVE works; settlements count 1.
+
+## scripts/settle-fees.js (real testnet transfers)
+Session ledger: signal 2.00, risk 21.50, execution 13.00 units @ 0.01 NEAR/unit.
+  PAID signal: 0.0200 NEAR -> omniperps-agent1-7f3a.testnet  tx Fzwj5hDDEBUvPhj4amwckGvdXYxY48CxpjjKoXeQPRpJ
+  PAID risk:   0.2150 NEAR -> omniperps-agent2-7f3a.testnet  tx 6CJihsoCzYSAf8rtj31YCGtvwG53jY8VtG2kq1rn2shN
+  execution 13 units -> 0.1300 NEAR retained by the payer (master account; no self-transfer)
+Master 2.986434 -> 2.751345 NEAR; agent1 10 -> 10.02 NEAR; agent2 10 -> 10.215 NEAR (independent RPC reads).
+
+## scripts/backtest.js (real Kraken daily candles)
+Window: peak 2026-01-17 (high $95,600, entry close $95,089.9) -> trough 2026-02-06 (low $60,500) = -36.72% in 20 days
+Entry: LONG 0.0947 BTC @ $95,089.9 x5 (Risk verdict: approve_reduced), margin $1,801, liq @ $76,454.19
+UNPROTECTED: LIQUIDATED on 2026-01-31 @ $75,600 — realised PnL $-1,801, final wallet $98,194.49
+PROTECTED:   no liquidation — force-reduce x5 (2026-01-25 x2, 01-26, 01-29 x2), force-close 2026-01-30 — realised PnL $-877.48, final wallet $99,113.95
+Chart rendered from the run data: docs/images/backtest.png. Full methodology: docs/BACKTEST.md.
+
+## Screenshots (tools/shots/capture.js, headless Chromium, real console)
+docs/images/console-overview.png — live position open, settlement record visible
+docs/images/stress-protection.png — FORCE-REDUCE 50% @ $62,706.37 in the log, liquidations 0
+docs/images/kill-switch.png — banner + "Cycle skipped: kill switch engaged"
+docs/images/replay-mode.png — REPLAY banner (selected manually) + recorded-price chart

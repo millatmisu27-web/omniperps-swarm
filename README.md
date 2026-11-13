@@ -16,7 +16,7 @@ Autonomous trading agents are easy to build and dangerous to trust: one bad mode
 - **Execution Agent** is the only agent that can touch the engine, and only with a Risk approval; it re-checks the guard itself immediately before acting.
 - **Agent Economy:** agents earn per completed task from a protocol fee pool (Signal per executed proposal, Risk per review + protection bonus, Execution per order) in a visible fee ledger — the swarm's internal labour market.
 - **SpendGuard (AI Security):** per-order notional cap ($25k), leverage ceiling (10x), minimum liquidation distance (12%), daily loss limit ($5k) — and a **global kill switch** that halts all agents instantly. Every check, pass or veto, is written to an audit log.
-- **NEAR layer (live, with proof):** three swarm accounts were **created and funded on NEAR testnet** — master `omniperps-swarm.testnet` + two agent accounts, 10 NEAR each, creation tx hashes in **docs/NEAR_PROOF.md** — and all state is read via plain JSON-RPC in `src/near-proof.js` (zero dependencies). Using NEAR Chain Signatures' official epsilon derivation, the swarm master deterministically controls EVM address **`0x28ece91f7e9506d4c6f6a8d36db270d4ec1a688d`** (path `ethereum-1`) — a derivation the live testnet MPC contract (`v1.signer-prod.testnet`) confirms byte-for-byte via its own `derived_public_key` view. Every executed order also produces a **NEAR Intents-style settlement intent** (`token_diff`). Honest limits: no MPC signature has been requested yet, and no intent has been executed on Intents mainnet.
+- **NEAR layer (live, with proof):** three swarm accounts were **created and funded on NEAR testnet** — master `omniperps-swarm.testnet` + two agent accounts, 10 NEAR each, creation tx hashes in **docs/NEAR_PROOF.md** — and all state is read via plain JSON-RPC in `src/near-proof.js` (zero dependencies). Using NEAR Chain Signatures' official epsilon derivation, the swarm master deterministically controls EVM address **`0x28ece91f7e9506d4c6f6a8d36db270d4ec1a688d`** (path `ethereum-1`) — a derivation the live testnet MPC contract (`v1.signer-prod.testnet`) confirms byte-for-byte via its own `derived_public_key` view. **A real MPC signature has since been requested from that contract and cryptographically verified**: ecrecover over the signed demo payload reproduces exactly that EVM address (sign tx `E9TZrQ3wVWFSoED61XKi1HowPi6w4XB5fDnMykWZpX8b`; reproduce with `node scripts/mpc-proof.js`). The **SpendGuard policy is also deployed as a real NEAR testnet contract** (`guard.omniperps-swarm.testnet`, near-sdk-js) mirroring `src/policy.js`, and is exercised live — in-limit allowed, oversize denied, kill switch denies (reproduce with `node scripts/guard-proof.js`). Every executed order also produces a **NEAR Intents-style settlement intent** (`token_diff`). Honest limits: no intent has been executed on Intents mainnet, and no EVM transaction has been broadcast from the derived address.
 
 ```
                  live BTC feed (Kraken/Coinbase/CoinGecko)
@@ -54,6 +54,10 @@ Prerequisite: Node.js ≥ 18. **No dependencies to install** (zero-dependency by
    → *See:* the cycle is blocked and logged; no agent can trade until the switch is released.
 6. **Read the NEAR proof** — `docs/NEAR_PROOF.md`
    → *See:* real NEAR testnet RPC reads captured from the network, the chain-signatures derivation status, and an explicit list of what is **not** done.
+7. **Verify the real MPC signature** — `node scripts/mpc-proof.js`
+   → *See:* the script re-fetches the sign transaction (`E9TZrQ3wVWFSoED61XKi1HowPi6w4XB5fDnMykWZpX8b`) live from testnet RPC, extracts the signature the MPC network returned, and verifies it — ECDSA against the derived public key **and** Ethereum ecrecover — concluding `MPC SIGNATURE VERIFIED ... 0x28ece91f7e9506d4c6f6a8d36db270d4ec1a688d`.
+8. **Exercise the deployed SpendGuard contract** — `node scripts/guard-proof.js`
+   → *See:* the live state of `guard.omniperps-swarm.testnet` read from testnet. With the demo keys file (coordinator-held, outside the repo) it also runs the signed checks: in-limit → allowed, oversize → denied, kill switch on → denied, then off again.
 
 ## Live vs simulated — stated plainly
 
@@ -64,7 +68,8 @@ Prerequisite: Node.js ≥ 18. **No dependencies to install** (zero-dependency by
 | Stress test | **SIMULATED overlay** on the live price, always labelled in UI and logs. It exists so protection can be demonstrated on demand. |
 | Agent decisions | **REAL logic, running live** — EMA signal, independent risk review, guard checks, fee ledger. No LLM calls; the agents are deterministic policy-driven programs (auditable by design). |
 | NEAR testnet | **LIVE** — three swarm accounts created + funded on testnet (10 NEAR each; creation tx hashes in docs/NEAR_PROOF.md); state read live via JSON-RPC (`src/near-proof.js`, also served at `/api/near` in the console). |
-| Chain Signatures | **DERIVED + contract-confirmed** — the master's EVM address for path `ethereum-1` is derived client-side with the official epsilon derivation and confirmed byte-identical by the testnet MPC contract's `derived_public_key` view. **No MPC signature has been requested or produced** — none is claimed. |
+| Chain Signatures | **SIGNATURE PRODUCED + VERIFIED** — the master's EVM address for path `ethereum-1` is derived client-side with the official epsilon derivation and confirmed byte-identical by the testnet MPC contract's `derived_public_key` view; then a **real `sign` request** was submitted to `v1.signer-prod.testnet` (tx `E9TZrQ3wVWFSoED61XKi1HowPi6w4XB5fDnMykWZpX8b`) and the returned signature **verifies**: ecrecover over the signed payload (sha256 of a labelled demo message) reproduces the derived address. Reproduce: `node scripts/mpc-proof.js`. The signature was over a demo payload digest — no EVM transaction has been broadcast from the derived address. |
+| SpendGuard contract | **DEPLOYED on testnet** — `guard.omniperps-swarm.testnet` (near-sdk-js, source in `contracts/spendguard/`), state mirroring `src/policy.js` exactly, owner = swarm master. Live checks proven on-chain: in-limit allowed, oversize denied, kill switch denies (tx hashes in docs/NEAR_PROOF.md; reproduce: `node scripts/guard-proof.js`). The swarm's runtime enforcement is still the identical off-chain module by default; the server can log one live contract read per cycle with `OMNIPERPS_GUARD_CHAIN=1`. |
 | NEAR Intents | The swarm **produces** an Intents-style `token_diff` settlement intent per executed order. It is **not executed** on Intents mainnet (Intents has no testnet — HACKATHON.md Q-007). |
 
 ## Deployment
@@ -77,7 +82,7 @@ Prerequisite: Node.js ≥ 18. **No dependencies to install** (zero-dependency by
 
 ## Tech
 
-Node.js (zero dependencies) · NEAR testnet JSON-RPC · Kraken/Coinbase/CoinGecko public APIs · NEAR Chain Signatures (derivation — see proof doc) · NEAR Intents-style settlement intents · `node:test` suite.
+Node.js (zero dependencies) · NEAR testnet JSON-RPC · Kraken/Coinbase/CoinGecko public APIs · NEAR Chain Signatures (derivation **and a real, verified MPC signature** — see proof doc) · SpendGuard contract in TypeScript on near-sdk-js (tooling-only deps, under `contracts/`) · NEAR Intents-style settlement intents · `node:test` suite.
 
 ## Layout
 
@@ -89,7 +94,13 @@ src/policy.js        SpendGuard — limits, vetoes, kill switch, audit log
 src/agents.js        Signal / Risk / Execution + fee ledger + intents
 src/pricefeed.js     live price feed with source fallback chain
 src/near-proof.js    NEAR testnet RPC reads + derivation (see docs/NEAR_PROOF.md)
+src/near-tx.js       minimal signed-transaction client (Borsh + Ed25519, built-ins only)
+src/guard-chain.js   optional live read of the on-chain SpendGuard per cycle (env flag)
+contracts/spendguard/  SpendGuard contract (near-sdk-js) deployed to guard.omniperps-swarm.testnet
 scripts/demo-cli.js  headless end-to-end demo (npm run demo)
+scripts/mpc-proof.js   verify the real MPC signature against the live sign tx (zero-dep)
+scripts/guard-proof.js exercise the deployed SpendGuard contract live (zero-dep)
+tools/near-tools/      tooling-only scripts (near-api-js): mpc-sign.js, deploy-guard.js
 tests/               21 tests (npm test)
 TESTS.md             captured test + demo output
 DEMO_SCRIPT.md       60–90s demo video script for the X post
@@ -100,7 +111,7 @@ BUILD_LOG.md         what was built and verified, with timestamps
 ## Safety & honesty notes
 
 - Demo/testnet only. The paper account cannot lose real money; the guard limits are set for the demo and are visible in the UI.
-- No secrets in this repo: no private keys are used or committed. Any testnet material is demo-only and labelled as such.
+- No secrets in this repo: **no private keys are committed**. The demo testnet keys live in a coordinator-held file *outside* the repo (mode 600) and are used only by the tooling/proof scripts (`tools/near-tools/`, `scripts/guard-proof.js`) to sign testnet transactions. Testnet funds have zero real-world value.
 - This is a hackathon prototype, not financial advice and not a production trading system.
 
 ## License

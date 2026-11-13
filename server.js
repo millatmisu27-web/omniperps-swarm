@@ -16,6 +16,10 @@ const { PerpEngine } = require('./src/perps');
 const { SpendGuard } = require('./src/policy');
 const { PriceFeed } = require('./src/pricefeed');
 const { Swarm } = require('./src/agents');
+// Optional, env-flagged (OMNIPERPS_GUARD_CHAIN=1): logs one LIVE read of
+// the deployed on-chain SpendGuard contract per decision cycle. Inert
+// when the flag is unset; read-only and fail-safe when set.
+const guardChain = require('./src/guard-chain');
 
 const PORT = process.env.PORT || 4173;
 const PUBLIC = path.join(__dirname, 'public');
@@ -75,6 +79,7 @@ setInterval(() => {
   if (Date.now() - swarm.lastCycleAt < swarm.cycleCooldownMs) return;
   const p = effectivePrice();
   if (p == null) return;
+  guardChain.logLiveGuardCheck(swarm, 'auto-cycle');
   swarm.runCycle(feed.history.concat([{ price: p }]), p);
 }, 5000);
 
@@ -129,6 +134,7 @@ const server = http.createServer(async (req, res) => {
       const p = effectivePrice();
       if (url.pathname === '/api/cycle') {
         if (p == null) return sendJson(res, 400, { error: 'no live price yet' });
+        guardChain.logLiveGuardCheck(swarm, 'api-cycle');
         return sendJson(res, 200, swarm.runCycle(feed.history.concat([{ price: p }]), p));
       }
       if (url.pathname === '/api/stress') {

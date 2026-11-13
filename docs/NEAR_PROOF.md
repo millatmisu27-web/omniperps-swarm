@@ -5,6 +5,13 @@ by running `node src/near-proof.js` (zero-dependency Node, plain `fetch` JSON-RP
 Nothing in the "LIVE" section is invented or hard-coded as a result — re-running
 the module re-fetches and will show newer block heights.
 
+**Upgrade, same night (~20:08–20:23 UTC):** a REAL MPC signature was requested
+from the testnet Chain Signatures contract and cryptographically verified,
+and the SpendGuard policy was deployed as a REAL NEAR testnet contract and
+exercised live. Both are documented in their own sections below, with
+judge-reproducible proof scripts (`scripts/mpc-proof.js`,
+`scripts/guard-proof.js`).
+
 Code: [`src/near-proof.js`](../src/near-proof.js) — exports `getTestnetStatus`,
 `getLatestBlock`, `viewAccount`, `getMpcPublicKey`, `deriveEvmAddress`,
 `deriveChildPublicKey`, `buildSettlementIntent`, `collectProof`.
@@ -52,6 +59,75 @@ Verify any of them: `view_account` on `https://rpc.testnet.near.org`, or NearBlo
 
 Both match the constants pinned in chainsig.js (`ROOT_PUBLIC_KEYS`).
 
+### MPC signature — PRODUCED by the MPC network and VERIFIED (2026-11-13 ~20:15 UTC)
+
+A real `sign` request was submitted from the swarm master to the testnet
+Chain Signatures contract `v1.signer-prod.testnet` for path `ethereum-1`,
+over a clearly-labelled demo payload: the sha256 of the message
+*"OmniPerps Swarm - NEAR HACKATHON demo payload: MPC signature proof over a
+BTC-PERP settlement intent (paper trade, no real funds). Master:
+omniperps-swarm.testnet, path: ethereum-1."*
+
+| Field | Value |
+|---|---|
+| Sign tx hash | `E9TZrQ3wVWFSoED61XKi1HowPi6w4XB5fDnMykWZpX8b` |
+| Payload (sha256, hex) | `10929e760c75c6837c69d24f5e8c9deb0e177c7b3d0fc26824dd948283290353` |
+| Args shape | `{ request: { payload: [32 bytes], path: "ethereum-1", key_version: 0 } }`, 300 TGas, 1 NEAR deposit attached |
+| Signature `big_r` (affine point, compressed) | `035eb0d9ce65640b3e315308ce73e4eb9a90a52d261c6aa71b65c1f960f30babc2` |
+| Signature `s` (scalar) | `5ed1aba513ce2c0715b5d71391931292f57d36c85e451b7008a218c9c4bcb653` |
+| `recovery_id` | `0` |
+| Net cost | ≈ 0.00092 NEAR (master 9.9997537588960536 → 9.9988293871788309 NEAR across the request; the 1 NEAR deposit came back to the master, less the signature fee + gas). A preceding failed args probe cost ≈ 0.00025 NEAR gas (below). Total upgrade spend ≈ 0.00117 testnet NEAR. |
+
+**Verification (reproduce with `node scripts/mpc-proof.js`, zero-dependency):**
+the script re-fetches the tx outcome live from testnet RPC, extracts the
+signature, and checks it two independent ways against the payload —
+(1) ECDSA verify against the derived child public key
+(`z/s·G + r/s·Q` reproduces `big_r`), and (2) Ethereum **ecrecover** using
+the contract's `recovery_id`, which recovers exactly
+**`0x28ece91f7e9506d4c6f6a8d36db270d4ec1a688d`** — the derived EVM address.
+Both PASS. (One nuance, recorded honestly: the parity bit of the compressed
+`big_r` point as serialised by the contract disagrees with `recovery_id`;
+`recovery_id` is the authoritative recovery parity — using it is what
+recovers the derived address, which is the standard Ethereum convention.
+The ECDSA verification against the derived key holds regardless of parity.)
+The sign request was submitted with the tooling script
+`tools/near-tools/mpc-sign.js` (near-api-js; tooling only, keys read from
+the coordinator-held file outside this repo).
+
+### SpendGuard contract — DEPLOYED on NEAR testnet and exercised live (2026-11-13 ~20:19–20:22 UTC)
+
+The policy in `src/policy.js` is now also a real smart contract:
+**`guard.omniperps-swarm.testnet`**, written in TypeScript with
+near-sdk-js 2.0.0 (source: `contracts/spendguard/src/contract.ts`, built
+WASM 531,573 bytes), owner = `omniperps-swarm.testnet`. State mirrors
+`DEFAULT_LIMITS` exactly (cap 25000, leverage 10, min liquidation distance
+12%, daily loss 5000, killed=false).
+
+| Step | Tx hash |
+|---|---|
+| Create sub-account (funded 7 NEAR from master) | `k7rM6ZZggWydrGfqvtxTxEZy8Pei2izCXFhfVZvNUo1` |
+| Deploy contract code (code_hash after: `3oZeUS3bzTQji3LtuaW3en8Ew7U2Uz8Xb87JpAVGyc2g`) | `7jJBFKYc8QGEfWy8yy8386uGvqhQb2wEohZUZ6mmTjdB` |
+| `init({ owner: "omniperps-swarm.testnet" })` | `6HuYZBwPfZL2d6Vojv8URFWW1U8mzYw8XZebwN9z7Fju` |
+
+**Live checks against the deployed contract** — reproduce with
+`node scripts/guard-proof.js` (zero-dependency; signed calls use the
+hand-rolled Borsh+Ed25519 client in `src/near-tx.js` and the demo key from
+the coordinator-held file outside the repo):
+
+| Check | Result | Tx hash |
+|---|---|---|
+| `check_order` in-limit ($9,000, 5x, 40% liq distance, $0 daily loss) | `allowed: true` | `DFdxpfAPHGEDxwmUWf43neyEF1d9rASsAbGVN2PrRHoL` |
+| `check_order` oversize ($40,000) | `allowed: false` — "notional 40000 exceeds per-order cap 25000" | `FJrLntEXpLnfDjSbqrXj4mszgy1daWYu8brfztuG12S2` |
+| `set_killed(true)` by owner | `killed: true` | `BGsSMMHyGUAA2pQUEYcYYzSDDT6LVtwMovXpYa6C11Na` |
+| `check_order` in-limit with kill switch ON | `allowed: false` — "KILL SWITCH is engaged" | `928KpuJpt65LhRzhqKVfu5zEpiGFPp1cDqkRiw5JP2hB` |
+| `set_killed(false)` by owner | `killed: false` (left OFF) | `Ap1zedwqcJdVVXCuZjZg7d2UTpkpCCpPD9jRJyeW6hxT` |
+
+`get_state` after the run: `checks_count = 3`, `killed = false`, limits as
+above. Additionally, the dashboard server can log one LIVE `get_state`
+read of this contract per decision cycle when started with
+`OMNIPERPS_GUARD_CHAIN=1` (`src/guard-chain.js`; read-only, fail-safe,
+off by default — smoke-tested both ways, see TESTS.md).
+
 ---
 
 ## What was ATTEMPTED
@@ -79,6 +155,22 @@ Both match the constants pinned in chainsig.js (`ROOT_PUBLIC_KEYS`).
 3. **`testnet` registrar / direct signed creation** — not attempted beyond the
    above: it needs an existing funded account to sign, and the helper route
    already succeeded, so there was no reason to spend the timebox on it.
+
+### MPC `sign` calls (upgrade leg)
+
+1. **Flat args shape — FAILED on-chain.** `sign({ payload, path, key_version })`
+   (the shape in the near/mpc chain-signatures README) was rejected by the
+   deployed `v1.signer-prod.testnet` with
+   *"Smart contract panicked: Failed to deserialize input from JSON. Error:
+   missing field `request`"* — tx
+   `FvAHsNLzQc3Dr77Bd677fu7fDBqrLHuJp2Uj1kiuarUb`. The 1 NEAR deposit was
+   fully refunded; only ≈ 0.00025 NEAR of gas was spent. Recorded here
+   because the failure is what proved the deployed contract's real API.
+2. **Wrapped args shape — SUCCEEDED.** `sign({ request: { payload, path,
+   key_version } })` yielded to the MPC network and the resumed receipt
+   returned the signature documented in the LIVE section above (tx
+   `E9TZrQ3wVWFSoED61XKi1HowPi6w4XB5fDnMykWZpX8b`). No `payload_v2` enum
+   wrapper was needed on this deployment.
 
 ### MPC `derived_public_key` view call
 
@@ -139,16 +231,24 @@ settlement — it has not been signed or submitted to Intents.
 
 ## What is NOT done
 
-- **No MPC signature was requested or produced.** Calling `sign` on
-  `v1.signer` / `v1.signer-prod.testnet` requires a signed NEAR transaction
-  (and a signature deposit) from the account owner. We now *have* funded testnet
-  accounts + keys, so a testnet `sign` call is the obvious next step, but it was
-  not executed in this leg and no signature is claimed anywhere.
 - **No NEAR Intents execution on mainnet.** The settlement intent is generated
   locally only; nothing was signed, broadcast, or settled on `intents.near`.
-- **No contract is deployed** on the swarm accounts (code_hash is the empty-hash
-  sentinel) and no EVM transaction has been sent from the derived address;
-  the derived EVM address holds no funds.
+- **No EVM transaction has been broadcast from the derived address**, and the
+  derived EVM address holds no funds. The MPC signature documented above was
+  produced over the sha256 of a clearly-labelled demo message (a payload
+  digest, exactly what the MPC signs) — it proves control of the derived
+  address, but it is not a signed EVM transaction.
+- **The swarm's runtime enforcement is still the off-chain module.** The
+  deployed SpendGuard contract is a faithful on-chain mirror of
+  `src/policy.js` and is exercised by `scripts/guard-proof.js`; the live
+  server enforces the identical off-chain `SpendGuard` by default and only
+  *reads* the contract (log-only, fail-safe) when run with
+  `OMNIPERPS_GUARD_CHAIN=1`. Runtime cycles do not yet submit a signed
+  `check_order` to the contract per order.
+- The three swarm accounts themselves (master + agents) still have no
+  contract code on them (code_hash is the empty-hash sentinel); the
+  SpendGuard contract lives on its own sub-account,
+  `guard.omniperps-swarm.testnet`.
 
 ---
 
@@ -162,6 +262,11 @@ settlement — it has not been signed or submitted to Intents.
 > official epsilon derivation, the swarm master deterministically controls
 > EVM address `0x28ece91f7e9506d4c6f6a8d36db270d4ec1a688d` (path `ethereum-1`) —
 > a derivation the live testnet MPC contract (`v1.signer-prod.testnet`)
-> confirms byte-for-byte. Settlement is modelled as NEAR Intents `token_diff`
-> intents produced by the swarm. Honest limits: no MPC signature has been
-> requested yet and no intent has been executed on Intents mainnet.
+> confirms byte-for-byte, and for which a **real MPC signature was requested
+> and verified** (ecrecover over the signed payload reproduces the address;
+> `node scripts/mpc-proof.js`). The SpendGuard policy is also deployed as a
+> real testnet contract (`guard.omniperps-swarm.testnet`) and exercised
+> live (`node scripts/guard-proof.js`). Settlement is modelled as NEAR
+> Intents `token_diff` intents produced by the swarm. Honest limits: no
+> intent has been executed on Intents mainnet, and no EVM transaction has
+> been broadcast from the derived address.

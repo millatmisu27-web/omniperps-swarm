@@ -1,0 +1,7 @@
+# near-sdk-js tooling + build intermediates.
+# The compiled spendguard.wasm IS committed (the deployed artifact);
+# everything else in build/ is regenerable with `npm run build`.
+node_modules/
+build/*
+!build/spendguard.wasm
+build-js/
